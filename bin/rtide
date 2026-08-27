@@ -127,8 +127,8 @@ setup_wizard() {
   echo "Installed agents: $installed"
   prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}"
   read -rp "Default directory (empty = current dir): " default_dir
-  read -rp "Agent strip height in lines [10]: " strip_lines
-  strip_lines="${strip_lines:-10}"
+  read -rp "Agent strip % of window [30]: " agent_pct
+  agent_pct="${agent_pct:-30}"
   read -rp "nvim width % [50]: " nvim_pct
   nvim_pct="${nvim_pct:-50}"
   local shells=()
@@ -150,7 +150,7 @@ provider=$PROVIDER
 harness=$HARNESS
 model=$MODEL
 default_dir=$default_dir
-strip_lines=$strip_lines
+agent_pct=$agent_pct
 nvim_pct=$nvim_pct
 shell=$shell
 auto_float=$auto_float
@@ -342,6 +342,7 @@ source "$CONFIG"
 
 # legacy: agent= → harness=
 harness="${harness:-${agent:-}}"
+agent_pct="${agent_pct:-30}"   # agent strip height as % of window (top panes get the rest)
 
 DIR="${1:-${default_dir:-$(pwd)}}"
 DIR="${DIR/#\~/$HOME}"   # expand a leading ~ (rtide new passes the dir as typed)
@@ -406,7 +407,7 @@ NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
 tmux select-pane -t "$NVIM_PANE" -T nvim
 tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim" Enter
-tmux split-window -v -t "$NVIM_PANE" -l "$strip_lines"
+tmux split-window -v -t "$NVIM_PANE" -p "$agent_pct"
 AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
 tmux set-option -p -t "$AGENT_PANE" @rtide-role agent
 tmux select-pane -t "$AGENT_PANE" -T agent

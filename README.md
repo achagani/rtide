@@ -9,9 +9,13 @@ channeled through **tweb** as graphically rich HTML.
 │  nvim (0)    │  tweb (2)    │
 │  ~50%        │  ~50%        │
 ├──────────────┴──────────────┤
-│  agent (1) — ~10-line strip │
+│  agent (1) — ~30% strip     │
 └─────────────────────────────┘
 ```
+
+The agent strip is a thin input/output bar at the bottom (default 30% of the
+window, set with `agent_pct` in `~/.rtide/config`); the nvim + tweb panes get
+the rest. Zoom it with `prefix+a` when you need to work in it.
 
 ## What you get
 
