@@ -59,6 +59,11 @@ RTIDE is agent-agnostic. On every new-workspace launch it prompts for:
 The choice is stored per-workspace in `$DIR/.rtide/agent` (overriding the global
 config) and the agent pane is launched with the right env vars / flags for the combo.
 
+Pickers use **fzf** when it's installed (fuzzy search, so a long ollama model list
+isn't a wall of numbers) and fall back to a numbered list otherwise. The previously
+selected provider / harness / model is the default — it's highlighted first, so
+pressing Enter keeps it.
+
 ### Compatibility matrix
 
 | provider \ harness | claude | codex | hermes | opencode |
@@ -87,7 +92,8 @@ rtide new        → guided new workspace
 rtide switch     → picker over all rtide-* sessions (fzf if present)
 rtide ls         → list workspaces
 rtide sweep      → capture pending MEM: memories from every live session
-rtide kill [dir] → sweep that session's memories, then kill it
+rtide quit [dir] → sweep that session's memories, then kill it (from inside or out)
+rtide kill [dir] → alias for quit
 rtide agent      → re-pick provider/harness/model for the current workspace
 rtide auth       → check auth for the configured provider
 rtide matrix     → print the provider×harness compatibility matrix
@@ -102,8 +108,13 @@ rtide --no-ask   → skip the provider/harness prompt (use stored config)
 prefix+t → zoom tweb      (chat mode)
 prefix+a → zoom agent
 prefix+r → switch workspace
+prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)
 ```
+
+`prefix+Q` is the clean way out: it confirms, captures any pending `MEM:` lines
+from the agent pane, then kills the session (detaching you back to your shell).
+`prefix+d` detaches without quitting — the workspace keeps running.
 
 ## Conventions
 

@@ -6,7 +6,8 @@
 #   rtide switch     → picker over all rtide-* sessions
 #   rtide ls         → list workspaces
 #   rtide sweep      → capture pending MEM: memories from every live session
-#   rtide kill [dir] → sweep that session's memories, then kill it
+#   rtide quit [dir] → sweep that session's memories, then kill it (from inside or out)
+#   rtide kill [dir] → alias for quit
 #   rtide agent      → re-pick provider/harness/model for the current workspace
 #   rtide auth       → check auth for the configured provider
 #   rtide matrix     → print the provider×harness compatibility matrix
@@ -47,21 +48,49 @@ providers_for_installed() {
   echo "${out[*]}"
 }
 
-# pick <prompt> <default> <choices...> — numbered list, type number/name/Enter
+# pick <prompt> <default> <choices...> — fzf picker when available, else numbered list.
+# Free text is allowed: with fzf, a query that matches nothing is used as the answer.
 pick() {
   local prompt="$1" def="$2"; shift 2
   local choices=("$@")
-  if [[ ${#choices[@]} -gt 0 ]]; then
-    local i=0
-    for c in "${choices[@]}"; do
-      i=$((i+1))
-      echo "  $i) $c" >&2
-    done
+  if [[ ${#choices[@]} -eq 0 ]]; then
+    local ans
+    read -rp "$prompt [$def]: " ans
+    echo "${ans:-$def}"
+    return
   fi
+  if [[ ${#choices[@]} -eq 1 ]]; then
+    echo "${choices[0]}"
+    return
+  fi
+  if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
+    local out sel qry
+    local items=("${choices[@]}")
+    # put the default first so it's highlighted — Enter accepts it, typing filters normally
+    if printf '%s\n' "${choices[@]}" | grep -Fxq "$def"; then
+      items=("$def")
+      for c in "${choices[@]}"; do [[ "$c" != "$def" ]] && items+=("$c"); done
+    fi
+    out=$(printf '%s\n' "${items[@]}" | fzf --prompt="$prompt: " --height=40% --border --print-query)
+    sel=$(printf '%s\n' "$out" | tail -1)
+    if printf '%s\n' "${choices[@]}" | grep -Fxq "$sel"; then
+      echo "$sel"
+    else
+      qry=$(printf '%s\n' "$out" | head -1)
+      echo "${qry:-$def}"
+    fi
+    return
+  fi
+  # fallback: numbered list, type number/name/Enter
+  local i=0
+  for c in "${choices[@]}"; do
+    i=$((i+1))
+    echo "  $i) $c" >&2
+  done
   local ans
   read -rp "$prompt [$def]: " ans
   ans="${ans:-$def}"
-  if [[ "$ans" =~ ^[0-9]+$ ]] && [[ ${#choices[@]} -gt 0 ]] && (( ans >= 1 && ans <= ${#choices[@]} )); then
+  if [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#choices[@]} )); then
     ans="${choices[$((ans-1))]}"
   fi
   echo "$ans"
@@ -74,20 +103,19 @@ prompt_selection() {
   installed=$(installed_harnesses)
   providers=$(providers_for_installed)
   [[ -n "$providers" ]] || { echo "no agents found — install one first"; exit 1; }
-  # provider
-  [[ " $providers " == *" $1 "* ]] || PROVIDER=""
+  # provider — default to the current one if it's still available
+  [[ " $providers " == *" $1 "* ]] && PROVIDER="$1" || PROVIDER=""
   PROVIDER=$(pick "AI provider" "${PROVIDER:-$(echo "$providers" | awk '{print $1}')}" $providers)
   # harness (installed + compatible with the chosen provider)
   avail=()
   for h in $("$PROVIDER_BIN" compat "$PROVIDER"); do
     [[ " $installed " == *" $h "* ]] && avail+=("$h")
   done
-  [[ " ${avail[*]} " == *" $2 "* ]] || HARNESS=""
+  [[ " ${avail[*]} " == *" $2 "* ]] && HARNESS="$2" || HARNESS=""
   HARNESS=$(pick "Harness" "${HARNESS:-${avail[0]}}" "${avail[@]}")
-  # model
+  # model — default to the current one (free text allowed, so no availability check)
   models=$("$PROVIDER_BIN" models "$PROVIDER")
-  [[ -n "$models" ]] && echo "  models: $models"
-  MODEL=$(pick "Model" "${MODEL:-$(echo "$models" | awk '{print $1}')}" $models)
+  MODEL=$(pick "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models)
 }
 
 # --- commands --------------------------------------------------------------
@@ -169,14 +197,18 @@ cmd_switch() {
   sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^rtide-' || true)
   [[ -z "$sessions" ]] && { echo "no workspaces — run 'rtide new'"; exit 1; }
   local pick=""
-  if command -v fzf >/dev/null 2>&1; then
+  if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
     pick=$(echo "$sessions" | fzf --prompt="workspace: ")
   else
     echo "$sessions" | nl
     read -rp "Pick a workspace: " n
     pick=$(echo "$sessions" | sed -n "${n}p")
   fi
-  [[ -n "$pick" ]] && { tmux switch-client -t "$pick" 2>/dev/null || tmux attach -t "$pick"; }
+  [[ -n "$pick" ]] && {
+    tmux switch-client -t "$pick" 2>/dev/null \
+      || tmux attach -t "$pick" 2>/dev/null \
+      || echo "switch to $pick — attach with: tmux attach -t $pick"
+  }
   exit 0
 }
 
@@ -194,10 +226,33 @@ cmd_sweep() {
   exit 0
 }
 
-cmd_kill() {
-  local target="rtide-$(basename "${2:-$(pwd)}")"
+# quit [dir|session] — sweep the workspace's memories, then kill it.
+# No arg: the current tmux session (or the dir we're in). Only kills rtide workspaces.
+cmd_quit() {
+  local arg="${2:-}" target
+  if [[ -n "$arg" ]]; then
+    # A session name wins; anything else is a directory (whose basename may
+    # itself start with "rtide-", e.g. a project called rtide-proj).
+    if tmux has-session -t "$arg" 2>/dev/null; then
+      target="$arg"
+    else
+      target="rtide-$(basename "$arg")"
+    fi
+  else
+    target=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+    [[ "$target" == rtide-* ]] || target="rtide-$(basename "$(pwd)")"
+  fi
+  if ! tmux has-session -t "$target" 2>/dev/null; then
+    echo "no workspace: $target" >&2
+    exit 1
+  fi
+  if ! tmux list-windows -t "$target" -F '#{window_name}' 2>/dev/null | grep -qx work; then
+    echo "not an rtide workspace: $target" >&2
+    exit 1
+  fi
   rtide-mem sweep "$target" 2>/dev/null || true   # capture pending memories first
-  tmux kill-session -t "$target" 2>/dev/null
+  tmux kill-session -t "$target"
+  echo "quit: $target"
   exit 0
 }
 
@@ -274,7 +329,8 @@ case "${1:-}" in
   zoom)   cmd_zoom "$@" ;;
   ls)     cmd_ls ;;
   sweep)  cmd_sweep ;;
-  kill)   cmd_kill "$@" ;;
+  quit)   cmd_quit "$@" ;;
+  kill)   cmd_quit "$@" ;;
   agent)  cmd_agent "$@" ;;
   auth)   cmd_auth "$@" ;;
   matrix) "$PROVIDER_BIN" matrix; exit 0 ;;
@@ -288,6 +344,7 @@ source "$CONFIG"
 harness="${harness:-${agent:-}}"
 
 DIR="${1:-${default_dir:-$(pwd)}}"
+DIR="${DIR/#\~/$HOME}"   # expand a leading ~ (rtide new passes the dir as typed)
 
 mkdir -p "$DIR"   # create the workspace dir if it doesn't exist yet
 tweb doctor --fix >/dev/null 2>&1 || true
@@ -305,7 +362,10 @@ mkdir -p "$DIR/.rtide/memory"
 
 S="rtide-$(basename "$DIR")"
 if tmux has-session -t "$S" 2>/dev/null; then
-  tmux switch-client -t "$S" 2>/dev/null || tmux attach -t "$S"; exit 0
+  tmux switch-client -t "$S" 2>/dev/null \
+    || tmux attach -t "$S" 2>/dev/null \
+    || echo "workspace $S is running — attach with: tmux attach -t $S"
+  exit 0
 fi
 
 # Per-workspace override + always-ask selection (new workspace)
@@ -323,10 +383,18 @@ model=$model
 EOF
 fi
 
-# Validate the combo before launching
+# Validate the combo before launching. A stale config (e.g. agent=claude +
+# provider=openai from the original defaults) is auto-corrected rather than
+# refusing to start.
 if ! "$PROVIDER_BIN" compat "$provider" 2>/dev/null | grep -qw "$harness"; then
-  echo "error: $harness is not compatible with $provider (see 'rtide matrix')" >&2
-  exit 1
+  fixed=$("$PROVIDER_BIN" compat_h "$harness" 2>/dev/null | awk '{print $1}')
+  if [[ -n "$fixed" ]]; then
+    echo "note: $harness is not compatible with $provider — using $fixed"
+    provider="$fixed"
+  else
+    echo "error: $harness is not compatible with $provider (see 'rtide matrix')" >&2
+    exit 1
+  fi
 fi
 
 AGENT_CMD=$("$PROVIDER_BIN" launch "$harness" "$provider" "$model")
@@ -352,6 +420,7 @@ tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
 bind_if_free t "run-shell 'rtide zoom tweb'"
 bind_if_free a "run-shell 'rtide zoom agent'"
 bind_if_free r "run-shell 'rtide switch'"
+bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
 tmux select-pane -t "$NVIM_PANE"
 if [[ -z "${TMUX:-}" ]]; then
   tmux attach -t "$S" 2>/dev/null || echo "workspace $S created — attach with: tmux attach -t $S"

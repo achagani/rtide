@@ -141,7 +141,7 @@ models() { # $1=provider
       echo "gpt-5.6 gpt-5.6-sol gpt-5.2 gpt-5.1-codex"
       ;;
     ollama)
-      ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || true
+      timeout 3 ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || true
       ;;
     *)
       echo "unknown provider: $1" >&2

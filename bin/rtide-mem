@@ -123,11 +123,18 @@ EOF
 
 cmd_sweep() {
   local sess="${1:?usage: rtide-mem sweep <session>}"
-  local pane lines line slug fact
+  local pane lines line slug fact dir
   # find the agent pane by its @rtide-role option (set by rtide); fall back to pane 1
   pane=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
     | awk '$2=="agent"{print $1; exit}')
   [[ -n "$pane" ]] || pane="$sess:work.1"
+  # resolve the workspace dir from the agent pane so memories land in the right project
+  # (caller cwd is unreliable — run-shell runs in the tmux server's cwd)
+  dir=$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null || true)
+  if [[ -n "$dir" && -d "$dir" ]]; then
+    cd "$dir"
+    PROJECT_DIR="$(pwd)/.rtide/memory"
+  fi
   lines=$(tmux capture-pane -t "$pane" -S -2000 -p 2>/dev/null | grep '^MEM: ' | sed 's/^MEM: //' || true)
   [[ -n "$lines" ]] || { echo "swept: $sess (no MEM lines)"; return 0; }
   while IFS= read -r line; do

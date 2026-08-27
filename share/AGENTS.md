@@ -13,14 +13,16 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 ## Rendering
 1. Write a self-contained HTML file to `.tweb/<slug>.html`
    (inline CSS, dark theme, no external deps).
-2. Render: `tweb render .tweb/<slug>.html`
-3. Dense content: `tweb render --float .tweb/<slug>.html`
+2. Render: `tweb navigate file://<abs path to .tweb/<slug>.html>`
+   — this shows the page in the tweb pane, wherever you run it from.
+3. Dense content: render, then `tweb float` to pop the tweb pane to a desktop window.
 4. Live updates: render once, then `tweb eval "…"` to update the page in place.
-5. Use the template at `~/.rtide/share/template.html` for consistent styling.
+5. Use the template at `~/rtide/share/template.html` for consistent styling.
 
 ## Tools
-- `tweb render <file>` / `tweb render --url <url>` — open in the tweb pane
-- `tweb run <cmd>` — run a program, render its output in tweb (exit code, duration)
+- `tweb navigate <url>` — show a page in the tweb pane (the agent's render command)
+- `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb
+- `tweb-run <cmd>` — run a program, render its output in tweb (exit code, duration)
 - `tweb float` / `tweb pin` — pop to desktop window / return to pane
 - `tweb mcp` tools — navigate, click, fill, eval, snapshot (drive the browser)
 

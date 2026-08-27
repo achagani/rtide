@@ -6,10 +6,19 @@
 #   cmd | tweb-render -         wrap piped output in a minimal dark page
 set -euo pipefail
 
+# Show a page in the existing tweb pane; if none is running, open a browser here.
+# `tweb navigate` targets the running browser pane no matter where it is invoked,
+# so this works from the agent pane, nvim's :terminal, or a plain shell.
+tweb_show() {
+  local url="$1"
+  tweb navigate "$url" 2>/dev/null && return 0
+  tweb open "$url"
+}
+
 FLOAT=0
 case "${1:-}" in
   --float) FLOAT=1; shift ;;
-  --url)   shift; tweb open "$1"; exit 0 ;;
+  --url)   shift; tweb_show "$1"; [[ $FLOAT -eq 1 ]] && tweb float; exit 0 ;;
 esac
 
 FILE="${1:?usage: tweb-render [--float] <file>}"
@@ -24,10 +33,10 @@ if [[ "$FILE" == "-" ]]; then
     cat
     echo "</pre></body></html>"
   } > "$OUT"
-  tweb open "file://$OUT"
+  tweb_show "file://$OUT"
   [[ $FLOAT -eq 1 ]] && tweb float
   exit 0
 fi
 
-tweb open "file://$(realpath "$FILE")"
+tweb_show "file://$(realpath "$FILE")"
 [[ $FLOAT -eq 1 ]] && tweb float

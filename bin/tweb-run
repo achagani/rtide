@@ -4,6 +4,13 @@
 #   tweb-run --float <cmd...>  run and pop the result to a desktop window
 set -euo pipefail
 
+# Show a page in the existing tweb pane; if none is running, open a browser here.
+tweb_show() {
+  local url="$1"
+  tweb navigate "$url" 2>/dev/null && return 0
+  tweb open "$url"
+}
+
 FLOAT=0
 [[ "${1:-}" == "--float" ]] && { FLOAT=1; shift; }
 [[ $# -eq 0 ]] && { echo "usage: tweb-run [--float] <cmd...>" >&2; exit 1; }
@@ -26,5 +33,5 @@ COLOR=$([[ $RC -eq 0 ]] && echo "#3fb950" || echo "#f85149")
   echo "<p style=\"color:${COLOR}\">exit ${RC} · ${DUR}s</p></body></html>"
 } > "$OUT"
 
-tweb open "file://$OUT"
+tweb_show "file://$OUT"
 [[ $FLOAT -eq 1 ]] && tweb float
