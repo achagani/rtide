@@ -1,0 +1,8 @@
+# Per-project runtime artifacts (seeded by rtide, never committed)
+.tweb/
+
+# Editor cruft
+*.swp
+*.swo
+*~
+.DS_Store

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# tweb-render — open a file (or stdin) in the tweb pane.
+#   tweb-render <file>          open a local HTML file
+#   tweb-render --float <file>  open and pop to a desktop window
+#   tweb-render --url <url>     open a URL
+#   cmd | tweb-render -         wrap piped output in a minimal dark page
+set -euo pipefail
+
+FLOAT=0
+case "${1:-}" in
+  --float) FLOAT=1; shift ;;
+  --url)   shift; tweb open "$1"; exit 0 ;;
+esac
+
+FILE="${1:?usage: tweb-render [--float] <file>}"
+
+if [[ "$FILE" == "-" ]]; then
+  # stdin: wrap piped output in a minimal dark page
+  OUT="$HOME/.cache/rtide/pipe.html"
+  mkdir -p "$(dirname "$OUT")"
+  {
+    echo "<!DOCTYPE html><html><head><meta charset=utf-8><title>pipe</title>"
+    echo "<style>body{background:#0d1117;color:#e6edf3;font-family:ui-monospace,monospace;padding:2rem;max-width:900px;margin:0 auto}pre{white-space:pre-wrap}</style></head><body><pre>"
+    cat
+    echo "</pre></body></html>"
+  } > "$OUT"
+  tweb open "file://$OUT"
+  [[ $FLOAT -eq 1 ]] && tweb float
+  exit 0
+fi
+
+tweb open "file://$(realpath "$FILE")"
+[[ $FLOAT -eq 1 ]] && tweb float

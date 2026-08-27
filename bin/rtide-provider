@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# rtide-provider — provider/harness knowledge base for RTIDE.
+#   rtide-provider compat <provider>                    → harnesses compatible with provider
+#   rtide-provider compat-h <harness>                  → providers compatible with harness
+#   rtide-provider env <harness> <provider> <model>    → export/unset lines for the combo
+#   rtide-provider launch <harness> <provider> <model> → full command for the agent pane
+#   rtide-provider check <provider>                    → auth/health check (exit 0 = OK)
+#   rtide-provider models <provider>                    → available models
+#   rtide-provider matrix                              → compatibility matrix
+set -euo pipefail
+
+OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
+
+# Compatibility matrix (verified mid-2026):
+#   claude: anthropic (OAuth/API key), ollama (Anthropic-compat endpoint). NOT openai.
+#   codex:  openai (OAuth/API key), ollama (--oss). NOT anthropic.
+#   hermes/opencode: all three.
+compat() { # $1=provider → harnesses
+  case "$1" in
+    anthropic) echo "claude hermes opencode" ;;
+    openai)    echo "codex hermes opencode" ;;
+    ollama)    echo "claude codex hermes opencode" ;;
+    *)         echo "" ;;
+  esac
+}
+
+compat_h() { # $1=harness → providers
+  case "$1" in
+    claude)   echo "anthropic ollama" ;;
+    codex)    echo "openai ollama" ;;
+    hermes)   echo "anthropic openai ollama" ;;
+    opencode) echo "anthropic openai ollama" ;;
+    *)        echo "" ;;
+  esac
+}
+
+# Env lines to point a harness at a provider. claude+anthropic must unset the
+# ollama vars so a global ANTHROPIC_BASE_URL doesn't leak into Anthropic.
+env_for() { # $1=harness $2=provider $3=model
+  case "$1:$2" in
+    claude:anthropic)
+      echo "unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL"
+      ;;
+    claude:ollama)
+      echo "export ANTHROPIC_BASE_URL=$OLLAMA_URL"
+      echo "export ANTHROPIC_AUTH_TOKEN=ollama"
+      echo "export ANTHROPIC_API_KEY="
+      echo "export ANTHROPIC_DEFAULT_SONNET_MODEL=$3"
+      echo "export ANTHROPIC_DEFAULT_OPUS_MODEL=$3"
+      echo "export ANTHROPIC_DEFAULT_HAIKU_MODEL=$3"
+      ;;
+    hermes:anthropic)
+      echo "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
+      ;;
+    hermes:openai)
+      echo "export OPENAI_API_KEY=${OPENAI_API_KEY:-}"
+      ;;
+    opencode:anthropic)
+      echo "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
+      ;;
+    opencode:openai)
+      echo "export OPENAI_API_KEY=${OPENAI_API_KEY:-}"
+      ;;
+  esac
+}
+
+hermes_provider() { # $1=provider → hermes provider slug
+  case "$1" in
+    anthropic) echo "anthropic" ;;
+    openai)    echo "openai-api" ;;
+    ollama)    echo "ollama" ;;
+  esac
+}
+
+launch() { # $1=harness $2=provider $3=model
+  local envs cmd
+  envs=$(env_for "$1" "$2" "$3")
+  case "$1:$2" in
+    claude:*)     cmd="claude --model $3" ;;
+    codex:openai) cmd="codex --model $3" ;;
+    codex:ollama) cmd="codex --oss --local-provider ollama --model $3" ;;
+    hermes:*)     cmd="hermes --provider $(hermes_provider "$2") -m $3" ;;
+    opencode:*)   cmd="opencode --model $2/$3" ;;
+    *)            echo "unsupported combo: $1 + $2" >&2; return 1 ;;
+  esac
+  if [[ -n "$envs" ]]; then
+    echo "$envs; $cmd"
+  else
+    echo "$cmd"
+  fi
+}
+
+check() { # $1=provider
+  case "$1" in
+    anthropic)
+      if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        echo "OK: ANTHROPIC_API_KEY is set"
+        return 0
+      elif [[ -f "$HOME/.claude/.credentials.json" ]]; then
+        echo "OK: claude OAuth login present"
+        return 0
+      else
+        echo "NOT AUTHENTICATED: run 'claude login' or set ANTHROPIC_API_KEY"
+        return 1
+      fi
+      ;;
+    openai)
+      if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+        echo "OK: OPENAI_API_KEY is set"
+        return 0
+      elif [[ -f "$HOME/.codex/auth.json" ]] && grep -q '"tokens"' "$HOME/.codex/auth.json" 2>/dev/null; then
+        echo "OK: codex login present"
+        return 0
+      else
+        echo "NOT AUTHENTICATED: run 'codex login' or set OPENAI_API_KEY"
+        return 1
+      fi
+      ;;
+    ollama)
+      if curl -s -m 2 "$OLLAMA_URL/api/tags" >/dev/null 2>&1; then
+        echo "OK: ollama server reachable at $OLLAMA_URL"
+        return 0
+      else
+        echo "NOT RUNNING: start ollama (ollama serve) or set OLLAMA_URL"
+        return 1
+      fi
+      ;;
+    *)
+      echo "unknown provider: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+models() { # $1=provider
+  case "$1" in
+    anthropic)
+      echo "claude-sonnet-5 claude-opus-5 claude-fable-5 claude-haiku-4-5"
+      ;;
+    openai)
+      echo "gpt-5.6 gpt-5.6-sol gpt-5.2 gpt-5.1-codex"
+      ;;
+    ollama)
+      ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || true
+      ;;
+    *)
+      echo "unknown provider: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+matrix() {
+  printf "%-10s | %-7s %-7s %-7s %-8s\n" "provider" "claude" "codex" "hermes" "opencode"
+  printf "%-10s-+-%s\n" "" "--------------------------------"
+  for p in anthropic openai ollama; do
+    local line=""
+    for h in claude codex hermes opencode; do
+      if [[ " $(compat "$p") " == *" $h "* ]]; then line="$line ✅      "; else line="$line ❌      "; fi
+    done
+    printf "%-10s | %s\n" "$p" "$line"
+  done
+}
+
+case "${1:-}" in
+  compat)   shift; compat "$@" ;;
+  compat-h) shift; compat_h "$@" ;;
+  env)      shift; env_for "$@" ;;
+  launch)   shift; launch "$@" ;;
+  check)    shift; check "$@" ;;
+  models)   shift; models "$@" ;;
+  matrix)   matrix ;;
+  *) echo "usage: rtide-provider compat|compat-h|env|launch|check|models|matrix"; exit 1 ;;
+esac

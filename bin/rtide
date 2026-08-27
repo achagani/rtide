@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+# rtide — Rich Terminal IDE workspace launcher.
+#   rtide            → launch/attach the default workspace
+#   rtide <dir>      → launch/attach the workspace for <dir>
+#   rtide new        → guided new workspace
+#   rtide switch     → picker over all rtide-* sessions
+#   rtide ls         → list workspaces
+#   rtide sweep      → capture pending MEM: memories from every live session
+#   rtide kill [dir] → sweep that session's memories, then kill it
+#   rtide agent      → re-pick provider/harness/model for the current workspace
+#   rtide auth       → check auth for the configured provider
+#   rtide matrix     → print the provider×harness compatibility matrix
+#   rtide setup      → re-run the wizard
+#   rtide doctor     → verify deps
+#   rtide --no-ask   → skip the provider/harness prompt (use stored config)
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROVIDER_BIN="$SELF_DIR/rtide-provider"
+TWEB_DIR="$HOME/rtide/share"
+CONFIG_DIR="$HOME/.rtide"
+CONFIG="$CONFIG_DIR/config"
+WS_AGENT_FILE=".rtide/agent"   # per-workspace override, relative to the workspace dir
+
+if [[ "${1:-}" == "--no-ask" ]]; then RTIDE_ASK=0; shift; fi
+
+# --- provider/harness selection -------------------------------------------
+
+installed_harnesses() {
+  local out=()
+  for a in claude codex hermes opencode; do
+    command -v "$a" >/dev/null 2>&1 && out+=("$a")
+  done
+  echo "${out[*]}"
+}
+
+# providers that have at least one installed compatible harness
+providers_for_installed() {
+  local installed out
+  installed=$(installed_harnesses)
+  out=()
+  for p in anthropic openai ollama; do
+    for h in $("$PROVIDER_BIN" compat "$p"); do
+      [[ " $installed " == *" $h "* ]] && { out+=("$p"); break; }
+    done
+  done
+  echo "${out[*]}"
+}
+
+# pick <prompt> <default> <choices...> — numbered list, type number/name/Enter
+pick() {
+  local prompt="$1" def="$2"; shift 2
+  local choices=("$@")
+  if [[ ${#choices[@]} -gt 0 ]]; then
+    local i=0
+    for c in "${choices[@]}"; do
+      i=$((i+1))
+      echo "  $i) $c" >&2
+    done
+  fi
+  local ans
+  read -rp "$prompt [$def]: " ans
+  ans="${ans:-$def}"
+  if [[ "$ans" =~ ^[0-9]+$ ]] && [[ ${#choices[@]} -gt 0 ]] && (( ans >= 1 && ans <= ${#choices[@]} )); then
+    ans="${choices[$((ans-1))]}"
+  fi
+  echo "$ans"
+}
+
+# prompt_selection <cur_provider> <cur_harness> <cur_model> — sets PROVIDER/HARNESS/MODEL
+PROVIDER=""; HARNESS=""; MODEL=""
+prompt_selection() {
+  local installed providers avail models
+  installed=$(installed_harnesses)
+  providers=$(providers_for_installed)
+  [[ -n "$providers" ]] || { echo "no agents found — install one first"; exit 1; }
+  # provider
+  [[ " $providers " == *" $1 "* ]] || PROVIDER=""
+  PROVIDER=$(pick "AI provider" "${PROVIDER:-$(echo "$providers" | awk '{print $1}')}" $providers)
+  # harness (installed + compatible with the chosen provider)
+  avail=()
+  for h in $("$PROVIDER_BIN" compat "$PROVIDER"); do
+    [[ " $installed " == *" $h "* ]] && avail+=("$h")
+  done
+  [[ " ${avail[*]} " == *" $2 "* ]] || HARNESS=""
+  HARNESS=$(pick "Harness" "${HARNESS:-${avail[0]}}" "${avail[@]}")
+  # model
+  models=$("$PROVIDER_BIN" models "$PROVIDER")
+  [[ -n "$models" ]] && echo "  models: $models"
+  MODEL=$(pick "Model" "${MODEL:-$(echo "$models" | awk '{print $1}')}" $models)
+}
+
+# --- commands --------------------------------------------------------------
+
+setup_wizard() {
+  echo "==> RTIDE setup"
+  local installed; installed=$(installed_harnesses)
+  [[ -n "$installed" ]] || { echo "no agents found — install one first"; exit 1; }
+  echo "Installed agents: $installed"
+  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}"
+  read -rp "Default directory (empty = current dir): " default_dir
+  read -rp "Agent strip height in lines [10]: " strip_lines
+  strip_lines="${strip_lines:-10}"
+  read -rp "nvim width % [50]: " nvim_pct
+  nvim_pct="${nvim_pct:-50}"
+  local shells=()
+  for s in fish zsh nushell bash; do
+    command -v "$s" >/dev/null 2>&1 && shells+=("$s")
+  done
+  local def_shell=fish
+  command -v fish >/dev/null 2>&1 || def_shell=zsh
+  read -rp "Shell for running programs [$def_shell]: " shell
+  shell="${shell:-$def_shell}"
+  command -v "$shell" >/dev/null 2>&1 || echo "note: $shell not on PATH — install it (e.g. sudo apt install $shell)"
+  read -rp "Auto-float dense content? [y/N]: " af
+  local auto_float=false
+  [[ "$af" =~ ^[yY] ]] && auto_float=true
+  mkdir -p "$CONFIG_DIR"
+  cat > "$CONFIG" <<EOF
+# RTIDE config
+provider=$PROVIDER
+harness=$HARNESS
+model=$MODEL
+default_dir=$default_dir
+strip_lines=$strip_lines
+nvim_pct=$nvim_pct
+shell=$shell
+auto_float=$auto_float
+EOF
+  echo "Saved to $CONFIG"
+}
+
+cmd_doctor() {
+  local ok=1
+  for c in tweb tmux nvim; do
+    command -v "$c" >/dev/null 2>&1 || { echo "MISSING: $c"; ok=0; }
+  done
+  command -v kitty >/dev/null 2>&1 || command -v ghostty >/dev/null 2>&1 \
+    || { echo "MISSING: kitty or ghostty (terminal)"; ok=0; }
+  tmux -V 2>/dev/null | grep -qE '3\.[3-9]' || echo "WARN: tmux < 3.3 (tweb requires 3.3+)"
+  local found=0
+  for a in claude codex hermes opencode; do
+    command -v "$a" >/dev/null 2>&1 && { echo "agent: $a"; found=1; }
+  done
+  [[ $found -eq 0 ]] && { echo "MISSING: no agent (claude/codex/hermes/opencode)"; ok=0; }
+  for s in fish zsh nushell bash; do
+    command -v "$s" >/dev/null 2>&1 && echo "shell: $s"
+  done
+  if [[ -f "$CONFIG" ]]; then
+    source "$CONFIG"
+    local p="${provider:-}"
+    if [[ -n "$p" ]]; then
+      echo "provider: $p"
+      "$PROVIDER_BIN" check "$p" || ok=0
+    fi
+  fi
+  if [[ $ok -eq 1 ]]; then echo "doctor: all good"; fi
+  return $((1 - ok))
+}
+
+cmd_new() {
+  read -rp "Directory for new workspace (empty = current): " ndir
+  ndir="${ndir:-$(pwd)}"
+  exec "$0" "$ndir"
+}
+
+cmd_switch() {
+  local sessions
+  sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^rtide-' || true)
+  [[ -z "$sessions" ]] && { echo "no workspaces — run 'rtide new'"; exit 1; }
+  local pick=""
+  if command -v fzf >/dev/null 2>&1; then
+    pick=$(echo "$sessions" | fzf --prompt="workspace: ")
+  else
+    echo "$sessions" | nl
+    read -rp "Pick a workspace: " n
+    pick=$(echo "$sessions" | sed -n "${n}p")
+  fi
+  [[ -n "$pick" ]] && { tmux switch-client -t "$pick" 2>/dev/null || tmux attach -t "$pick"; }
+  exit 0
+}
+
+cmd_ls() {
+  tmux list-sessions -F '#{session_name}  #{session_windows}w  #{session_attached}attached' 2>/dev/null \
+    | grep '^rtide-' || echo "no workspaces"
+  exit 0
+}
+
+cmd_sweep() {
+  local s
+  for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^rtide-'); do
+    rtide-mem sweep "$s"
+  done
+  exit 0
+}
+
+cmd_kill() {
+  local target="rtide-$(basename "${2:-$(pwd)}")"
+  rtide-mem sweep "$target" 2>/dev/null || true   # capture pending memories first
+  tmux kill-session -t "$target" 2>/dev/null
+  exit 0
+}
+
+cmd_zoom() {
+  local role="${2:?usage: rtide zoom <nvim|agent|tweb>}"
+  local sess pane active
+  sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+  [[ -n "$sess" ]] || { echo "not in a tmux session"; exit 1; }
+  pane=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+    | awk -v r="$role" '$2==r{print $1; exit}')
+  [[ -n "$pane" ]] || { echo "no '$role' pane in $sess"; exit 1; }
+  active=$(tmux display-message -p -t "$sess:work" '#{pane_id}')
+  # resize-pane -Z toggles: if another pane is zoomed, unzoom it first, then zoom the target
+  if [[ "$(tmux display-message -p -t "$sess:work" '#{window_zoomed_flag}')" == "1" ]]; then
+    tmux resize-pane -Z -t "$active"
+    [[ "$active" == "$pane" ]] && exit 0   # was toggling the target off
+  fi
+  tmux resize-pane -Z -t "$pane"
+  exit 0
+}
+
+# Re-pick provider/harness/model for a workspace and restart its agent pane.
+cmd_agent() {
+  local dir="${2:-$(pwd)}"
+  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  local ws="$dir/$WS_AGENT_FILE"
+  [[ -f "$ws" ]] && source "$ws"
+  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}"
+  provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"
+  mkdir -p "$(dirname "$ws")"
+  cat > "$ws" <<EOF
+provider=$provider
+harness=$harness
+model=$model
+EOF
+  echo "agent: $harness + $provider ($model) for $dir"
+  local sess="rtide-$(basename "$dir")"
+  if tmux has-session -t "$sess" 2>/dev/null; then
+    local pane
+    pane=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+      | awk '$2=="agent"{print $1; exit}')
+    if [[ -n "$pane" ]]; then
+      tmux send-keys -t "$pane" C-c
+      tmux send-keys -t "$pane" "$("$PROVIDER_BIN" launch "$harness" "$provider" "$model")" Enter
+      echo "restarted agent pane in $sess"
+    fi
+  fi
+  exit 0
+}
+
+cmd_auth() {
+  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  local p="${2:-${provider:-}}"
+  [[ -n "$p" ]] || { echo "no provider configured — run 'rtide setup' or 'rtide agent'"; exit 1; }
+  local rc=0
+  "$PROVIDER_BIN" check "$p" || rc=$?
+  exit $rc
+}
+
+# Bind a key in the prefix table only if it's not already bound (don't clobber)
+bind_if_free() {
+  local key="$1" cmd="$2"
+  if ! tmux list-keys -T prefix 2>/dev/null \
+    | awk -v k="$key" '$1=="bind-key" && $4==k {found=1} END {exit !found}'; then
+    tmux bind-key "$key" "$cmd"
+  fi
+}
+
+case "${1:-}" in
+  setup)  setup_wizard; exit 0 ;;
+  doctor) cmd_doctor; exit 0 ;;
+  new)    cmd_new ;;
+  switch) cmd_switch ;;
+  zoom)   cmd_zoom "$@" ;;
+  ls)     cmd_ls ;;
+  sweep)  cmd_sweep ;;
+  kill)   cmd_kill "$@" ;;
+  agent)  cmd_agent "$@" ;;
+  auth)   cmd_auth "$@" ;;
+  matrix) "$PROVIDER_BIN" matrix; exit 0 ;;
+esac
+
+# Load config (run wizard on first run)
+[[ -f "$CONFIG" ]] || setup_wizard
+source "$CONFIG"
+
+# legacy: agent= → harness=
+harness="${harness:-${agent:-}}"
+
+DIR="${1:-${default_dir:-$(pwd)}}"
+
+mkdir -p "$DIR"   # create the workspace dir if it doesn't exist yet
+tweb doctor --fix >/dev/null 2>&1 || true
+
+# Seed per-project convention files (never clobber)
+for f in AGENTS.md CLAUDE.md; do
+  [[ -f "$DIR/$f" ]] || cp "$TWEB_DIR/AGENTS.md" "$DIR/$f"
+done
+mkdir -p "$DIR/.tweb"
+[[ -f "$DIR/.tweb/template.html" ]] || cp "$TWEB_DIR/template.html" "$DIR/.tweb/template.html"
+grep -q '^\.tweb/$' "$DIR/.gitignore" 2>/dev/null || echo '.tweb/' >> "$DIR/.gitignore"
+# Seed project memory (committed, like AGENTS.md)
+mkdir -p "$DIR/.rtide/memory"
+[[ -f "$DIR/.rtide/memory/MEMORY.md" ]] || echo "# Memory index" > "$DIR/.rtide/memory/MEMORY.md"
+
+S="rtide-$(basename "$DIR")"
+if tmux has-session -t "$S" 2>/dev/null; then
+  tmux switch-client -t "$S" 2>/dev/null || tmux attach -t "$S"; exit 0
+fi
+
+# Per-workspace override + always-ask selection (new workspace)
+WS_AGENT="$DIR/$WS_AGENT_FILE"
+[[ -f "$WS_AGENT" ]] && source "$WS_AGENT"
+harness="${harness:-${agent:-}}"
+if [[ "${RTIDE_ASK:-1}" != "0" ]]; then
+  prompt_selection "${provider:-}" "${harness:-}" "${model:-}"
+  provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"
+  mkdir -p "$(dirname "$WS_AGENT")"
+  cat > "$WS_AGENT" <<EOF
+provider=$provider
+harness=$harness
+model=$model
+EOF
+fi
+
+# Validate the combo before launching
+if ! "$PROVIDER_BIN" compat "$provider" 2>/dev/null | grep -qw "$harness"; then
+  echo "error: $harness is not compatible with $provider (see 'rtide matrix')" >&2
+  exit 1
+fi
+
+AGENT_CMD=$("$PROVIDER_BIN" launch "$harness" "$provider" "$model")
+
+# Build the layout with pane IDs (index-agnostic — respects base-index settings).
+# Each pane gets a pane-scoped @rtide-role option (survives title changes by apps).
+tmux new-session -d -s "$S" -n work -c "$DIR"
+NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
+tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
+tmux select-pane -t "$NVIM_PANE" -T nvim
+tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim" Enter
+tmux split-window -v -t "$NVIM_PANE" -l "$strip_lines"
+AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
+tmux set-option -p -t "$AGENT_PANE" @rtide-role agent
+tmux select-pane -t "$AGENT_PANE" -T agent
+tmux split-window -h -t "$NVIM_PANE" -p "$nvim_pct"
+TWEB_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')
+tmux set-option -p -t "$TWEB_PANE" @rtide-role tweb
+tmux select-pane -t "$TWEB_PANE" -T tweb
+tmux send-keys -t "$TWEB_PANE" 'tweb open' Enter
+tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
+# Global bindings that resolve panes by title in the current session at press-time
+bind_if_free t "run-shell 'rtide zoom tweb'"
+bind_if_free a "run-shell 'rtide zoom agent'"
+bind_if_free r "run-shell 'rtide switch'"
+tmux select-pane -t "$NVIM_PANE"
+if [[ -z "${TMUX:-}" ]]; then
+  tmux attach -t "$S" 2>/dev/null || echo "workspace $S created — attach with: tmux attach -t $S"
+else
+  tmux switch-client -t "$S" 2>/dev/null || echo "workspace $S created — attach with: tmux attach -t $S"
+fi

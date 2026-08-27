@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# tweb-run — run a command, render its output in tweb.
+#   tweb-run <cmd...>          run and show output (command, output, exit code, duration)
+#   tweb-run --float <cmd...>  run and pop the result to a desktop window
+set -euo pipefail
+
+FLOAT=0
+[[ "${1:-}" == "--float" ]] && { FLOAT=1; shift; }
+[[ $# -eq 0 ]] && { echo "usage: tweb-run [--float] <cmd...>" >&2; exit 1; }
+
+OUT="$HOME/.cache/rtide/run.html"
+mkdir -p "$(dirname "$OUT")"
+
+START=$(date +%s)
+set +e
+OUTPUT=$("$@" 2>&1)
+RC=$?
+set -e
+DUR=$(( $(date +%s) - START ))
+COLOR=$([[ $RC -eq 0 ]] && echo "#3fb950" || echo "#f85149")
+
+{
+  echo "<!DOCTYPE html><html><head><meta charset=utf-8><title>run</title>"
+  echo "<style>body{background:#0d1117;color:#e6edf3;font-family:ui-monospace,monospace;padding:2rem;max-width:900px;margin:0 auto}h1{font-size:1.1rem;color:#58a6ff}pre{background:#161b22;padding:1rem;border-radius:8px;overflow-x:auto;white-space:pre-wrap}</style></head><body>"
+  echo "<h1>\$ ${*}</h1><pre>${OUTPUT}</pre>"
+  echo "<p style=\"color:${COLOR}\">exit ${RC} · ${DUR}s</p></body></html>"
+} > "$OUT"
+
+tweb open "file://$OUT"
+[[ $FLOAT -eq 1 ]] && tweb float

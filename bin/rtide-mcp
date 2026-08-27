@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# rtide-mcp — register RTIDE's MCP servers (tweb + rtide-mem) with every installed harness.
+# Idempotent: skips servers already registered. OpenCode has no non-interactive
+# `mcp add`, so its config JSON is merged directly.
+set -euo pipefail
+
+BIN="$HOME/.local/bin"
+SERVERS=(tweb rtide-mem)
+
+registered() { # $1=harness $2=server
+  case "$1" in
+    claude)  claude mcp list 2>/dev/null | grep -qE "(^|\s)$2(:|\s|$)" ;;
+    codex)   codex mcp list 2>/dev/null | grep -qE "(^|\s)$2(\s|$)" ;;
+    hermes)  hermes mcp list 2>/dev/null | grep -qE "(^|\s)$2(\s|$)" ;;
+  esac
+}
+
+# --- Claude ---
+if command -v claude >/dev/null 2>&1; then
+  for s in "${SERVERS[@]}"; do
+    if registered claude "$s"; then
+      echo "claude: $s already registered"
+    else
+      claude mcp add "$s" "$BIN/$s" mcp >/dev/null 2>&1 \
+        && echo "claude: added $s" || echo "claude: FAILED to add $s"
+    fi
+  done
+fi
+
+# --- Codex ---
+if command -v codex >/dev/null 2>&1; then
+  for s in "${SERVERS[@]}"; do
+    if registered codex "$s"; then
+      echo "codex: $s already registered"
+    else
+      codex mcp add "$s" -- "$BIN/$s" mcp >/dev/null 2>&1 \
+        && echo "codex: added $s" || echo "codex: FAILED to add $s"
+    fi
+  done
+fi
+
+# --- Hermes ---
+if command -v hermes >/dev/null 2>&1; then
+  for s in "${SERVERS[@]}"; do
+    if registered hermes "$s"; then
+      echo "hermes: $s already registered"
+    else
+      printf 'Y\n' | hermes mcp add "$s" --command "$BIN/$s" --args mcp >/dev/null 2>&1 \
+        && echo "hermes: added $s" || echo "hermes: FAILED to add $s"
+    fi
+  done
+fi
+
+# --- OpenCode (JSON merge) ---
+if command -v opencode >/dev/null 2>&1; then
+  OPENCODE_CFG="$HOME/.config/opencode/opencode.json"
+  mkdir -p "$(dirname "$OPENCODE_CFG")"
+  python3 - "$OPENCODE_CFG" "${SERVERS[@]}" <<'PY'
+import sys, os, json
+cfg, servers = sys.argv[1], sys.argv[2:]
+data = {}
+if os.path.exists(cfg):
+    with open(cfg) as f:
+        data = json.load(f)
+mcp = data.setdefault("mcp", {})
+for s in servers:
+    mcp[s] = {"type": "stdio", "command": os.path.expanduser("~/.local/bin/" + s), "args": ["mcp"], "enabled": True}
+with open(cfg, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+print("opencode: wired", ", ".join(servers))
+PY
+fi
+
+echo "done"

@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+# rtide-mem — agent-independent persistent memory for RTIDE.
+#   rtide-mem init
+#   rtide-mem add <slug> <content> [--tag x] [--global] [--if-new]
+#   rtide-mem list | read <slug> | search <q> | update <slug> <content>
+#   rtide-mem sweep <session>     # auto-persist MEM: lines from the agent pane
+#   rtide-mem mcp                 # stdio MCP server (mem_add/read/search/update/list)
+set -euo pipefail
+
+GLOBAL_DIR="$HOME/.rtide/memory"
+PROJECT_DIR="$(pwd)/.rtide/memory"
+
+mem_dir() { [[ "${1:-project}" == "global" ]] && echo "$GLOBAL_DIR" || echo "$PROJECT_DIR"; }
+
+cmd_init() {
+  for d in "$GLOBAL_DIR" "$PROJECT_DIR"; do
+    mkdir -p "$d"
+    [[ -f "$d/MEMORY.md" ]] || echo "# Memory index" > "$d/MEMORY.md"
+  done
+  echo "initialized: $GLOBAL_DIR, $PROJECT_DIR"
+}
+
+cmd_add() {
+  local scope="project" ifnew=0
+  local tags=()
+  local positional=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) scope="global"; shift ;;
+      --if-new) ifnew=1; shift ;;
+      --tag)    tags+=("$2"); shift 2 ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+  local slug="${positional[0]:-}"
+  local content="${positional[1]:-}"
+  [[ -n "$slug" && -n "$content" ]] || { echo "usage: rtide-mem add <slug> <content> [--tag x] [--global] [--if-new]" >&2; return 1; }
+  local dir; dir=$(mem_dir "$scope")
+  mkdir -p "$dir"
+  local path="$dir/$slug.md"
+  if [[ $ifnew -eq 1 && -f "$path" ]]; then
+    echo "exists: $slug (skipped)"
+    return 0
+  fi
+  local today; today=$(date +%Y-%m-%d)
+  local tagline; tagline=$(IFS=,; echo "${tags[*]}")
+  local desc; desc=$(echo "$content" | head -1 | cut -c1-80)
+  cat > "$path" <<EOF
+---
+name: $slug
+description: $desc
+tags: [$tagline]
+scope: $scope
+created: $today
+updated: $today
+---
+
+$content
+EOF
+  local idx="$dir/MEMORY.md"
+  [[ -f "$idx" ]] || echo "# Memory index" > "$idx"
+  grep -q "($slug.md)" "$idx" 2>/dev/null || echo "- [$slug]($slug.md) — $desc" >> "$idx"
+  echo "saved: $slug ($scope)"
+}
+
+cmd_list() {
+  echo "== global ($GLOBAL_DIR)"
+  cat "$GLOBAL_DIR/MEMORY.md" 2>/dev/null || echo "(empty)"
+  echo
+  echo "== project ($PROJECT_DIR)"
+  cat "$PROJECT_DIR/MEMORY.md" 2>/dev/null || echo "(empty)"
+}
+
+cmd_read() {
+  local slug="${1:?usage: rtide-mem read <slug>}"
+  local f="$PROJECT_DIR/$slug.md"
+  [[ -f "$f" ]] || f="$GLOBAL_DIR/$slug.md"
+  [[ -f "$f" ]] || { echo "not found: $slug"; return 1; }
+  cat "$f"
+}
+
+cmd_search() {
+  local q="${1:?usage: rtide-mem search <query>}"
+  local found=0
+  for d in "$GLOBAL_DIR" "$PROJECT_DIR"; do
+    [[ -d "$d" ]] || continue
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      found=1
+      echo "== ${f#$HOME/}"
+      sed -n 's/^description: *//p' "$f" | head -1
+    done < <(grep -ril "$q" "$d" 2>/dev/null | grep -v '/MEMORY.md$' || true)
+  done
+  [[ $found -eq 1 ]] || echo "no matches for: $q"
+}
+
+cmd_update() {
+  local slug="${1:?usage: rtide-mem update <slug> <content>}"
+  local content="${2:?content required}"
+  local f="$PROJECT_DIR/$slug.md"
+  [[ -f "$f" ]] || f="$GLOBAL_DIR/$slug.md"
+  [[ -f "$f" ]] || { echo "not found: $slug"; return 1; }
+  local today; today=$(date +%Y-%m-%d)
+  local scope tags created
+  scope=$(sed -n 's/^scope: *//p' "$f" | head -1); scope="${scope:-project}"
+  tags=$(sed -n 's/^tags: *//p' "$f" | head -1)
+  created=$(sed -n 's/^created: *//p' "$f" | head -1); created="${created:-$today}"
+  local desc; desc=$(echo "$content" | head -1 | cut -c1-80)
+  cat > "$f" <<EOF
+---
+name: $slug
+description: $desc
+tags: $tags
+scope: $scope
+created: $created
+updated: $today
+---
+
+$content
+EOF
+  echo "updated: $slug"
+}
+
+cmd_sweep() {
+  local sess="${1:?usage: rtide-mem sweep <session>}"
+  local pane lines line slug fact
+  # find the agent pane by its @rtide-role option (set by rtide); fall back to pane 1
+  pane=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+    | awk '$2=="agent"{print $1; exit}')
+  [[ -n "$pane" ]] || pane="$sess:work.1"
+  lines=$(tmux capture-pane -t "$pane" -S -2000 -p 2>/dev/null | grep '^MEM: ' | sed 's/^MEM: //' || true)
+  [[ -n "$lines" ]] || { echo "swept: $sess (no MEM lines)"; return 0; }
+  while IFS= read -r line; do
+    slug="${line%% — *}"     # split on the " — " separator
+    fact="${line#* — }"
+    [[ -n "$slug" && -n "$fact" ]] && cmd_add "$slug" "$fact" --if-new
+  done <<< "$lines"
+  echo "swept: $sess"
+}
+
+cmd_mcp() {
+  local PY="$HOME/.cache/rtide/mcp_server.py"
+  mkdir -p "$(dirname "$PY")"
+  if [[ ! -f "$PY" ]]; then
+    cat > "$PY" <<'PYEOF'
+import json, sys, os, re, datetime
+
+GLOBAL = os.path.expanduser("~/.rtide/memory")
+PROJECT = os.path.join(os.getcwd(), ".rtide", "memory")
+
+def slugify(s):
+    return re.sub(r'[^a-z0-9-]+', '-', s.lower()).strip('-')
+
+def mem_path(slug, scope):
+    d = GLOBAL if scope == "global" else PROJECT
+    return os.path.join(d, slug + ".md")
+
+def add(slug, content, tags, scope):
+    d = GLOBAL if scope == "global" else PROJECT
+    os.makedirs(d, exist_ok=True)
+    p = mem_path(slug, scope)
+    today = datetime.date.today().isoformat()
+    desc = content.splitlines()[0][:80] if content else ""
+    tagline = ", ".join(tags)
+    with open(p, "w") as f:
+        f.write("---\nname: %s\ndescription: %s\ntags: [%s]\nscope: %s\ncreated: %s\nupdated: %s\n---\n\n%s\n" % (slug, desc, tagline, scope, today, today, content))
+    idx = os.path.join(d, "MEMORY.md")
+    if not os.path.exists(idx):
+        open(idx, "w").write("# Memory index\n")
+    with open(idx, "a") as f:
+        f.write("- [%s](%s.md) — %s\n" % (slug, slug, desc))
+    return p
+
+def read_mem(slug):
+    for scope in ("project", "global"):
+        p = mem_path(slug, scope)
+        if os.path.exists(p):
+            return open(p).read()
+    return None
+
+def search(q):
+    results = []
+    for scope in ("project", "global"):
+        d = GLOBAL if scope == "global" else PROJECT
+        if not os.path.isdir(d):
+            continue
+        for fn in os.listdir(d):
+            if fn.endswith(".md") and fn != "MEMORY.md":
+                p = os.path.join(d, fn)
+                try:
+                    txt = open(p).read()
+                except Exception:
+                    continue
+                if q.lower() in txt.lower():
+                    results.append({"slug": fn[:-3], "scope": scope, "path": p})
+    return results
+
+def update(slug, content):
+    for scope in ("project", "global"):
+        p = mem_path(slug, scope)
+        if os.path.exists(p):
+            today = datetime.date.today().isoformat()
+            txt = open(p).read()
+            def grab(key):
+                m = re.search(r'^%s:\s*(.*)$' % key, txt, re.M)
+                return m.group(1) if m else ""
+            tags = grab("tags"); created = grab("created") or today
+            desc = content.splitlines()[0][:80] if content else ""
+            with open(p, "w") as f:
+                f.write("---\nname: %s\ndescription: %s\ntags: %s\nscope: %s\ncreated: %s\nupdated: %s\n---\n\n%s\n" % (slug, desc, tags, scope, created, today, content))
+            return p
+    return None
+
+def list_mems():
+    out = []
+    for scope in ("project", "global"):
+        d = GLOBAL if scope == "global" else PROJECT
+        if os.path.isdir(d):
+            idx = os.path.join(d, "MEMORY.md")
+            if os.path.exists(idx):
+                out.append({"scope": scope, "index": open(idx).read()})
+    return out
+
+TOOLS = [
+    {"name": "mem_add", "description": "Add a memory. scope: 'project' (default) or 'global'.", "inputSchema": {"type": "object", "properties": {"slug": {"type": "string"}, "content": {"type": "string"}, "scope": {"type": "string", "enum": ["project", "global"]}, "tags": {"type": "array", "items": {"type": "string"}}, "if_new": {"type": "boolean"}}, "required": ["slug", "content"]}},
+    {"name": "mem_read", "description": "Read a memory by slug.", "inputSchema": {"type": "object", "properties": {"slug": {"type": "string"}}, "required": ["slug"]}},
+    {"name": "mem_search", "description": "Search memories by keyword.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "mem_update", "description": "Update a memory by slug.", "inputSchema": {"type": "object", "properties": {"slug": {"type": "string"}, "content": {"type": "string"}}, "required": ["slug", "content"]}},
+    {"name": "mem_list", "description": "List the memory index (project + global).", "inputSchema": {"type": "object", "properties": {}}},
+]
+
+def handle_call(name, args):
+    args = args or {}
+    if name == "mem_add":
+        slug = slugify(args.get("slug", ""))
+        if not slug:
+            return {"error": "slug required"}
+        p = mem_path(slug, args.get("scope", "project"))
+        if args.get("if_new") and os.path.exists(p):
+            return {"status": "exists", "path": p}
+        path = add(slug, args.get("content", ""), args.get("tags", []), args.get("scope", "project"))
+        return {"status": "saved", "path": path}
+    if name == "mem_read":
+        txt = read_mem(args.get("slug", ""))
+        return {"content": txt} if txt is not None else {"error": "not found"}
+    if name == "mem_search":
+        return {"results": search(args.get("query", ""))}
+    if name == "mem_update":
+        p = update(args.get("slug", ""), args.get("content", ""))
+        return {"path": p} if p else {"error": "not found"}
+    if name == "mem_list":
+        return {"memories": list_mems()}
+    return {"error": "unknown tool: %s" % name}
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except Exception:
+            continue
+        mid = msg.get("id")
+        method = msg.get("method")
+        if method == "initialize":
+            resp = {"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "rtide-mem", "version": "0.1.0"}}}
+        elif method == "notifications/initialized":
+            continue
+        elif method == "tools/list":
+            resp = {"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}}
+        elif method == "tools/call":
+            name = msg.get("params", {}).get("name", "")
+            args = msg.get("params", {}).get("arguments", {})
+            result = handle_call(name, args)
+            resp = {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": json.dumps(result)}]}}
+        elif method == "ping":
+            resp = {"jsonrpc": "2.0", "id": mid, "result": {}}
+        else:
+            resp = {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found: %s" % method}}
+        sys.stdout.write(json.dumps(resp) + "\n")
+        sys.stdout.flush()
+
+if __name__ == "__main__":
+    main()
+PYEOF
+  fi
+  exec python3 "$PY"
+}
+
+case "${1:-}" in
+  init)   shift; cmd_init "$@" ;;
+  add)    shift; cmd_add "$@" ;;
+  list)   cmd_list ;;
+  read)   shift; cmd_read "$@" ;;
+  search) shift; cmd_search "$@" ;;
+  update) shift; cmd_update "$@" ;;
+  sweep)  shift; cmd_sweep "$@" ;;
+  mcp)    cmd_mcp ;;
+  *) echo "usage: rtide-mem init|add|list|read|search|update|sweep|mcp"; exit 1 ;;
+esac

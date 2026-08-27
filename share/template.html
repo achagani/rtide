@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTIDE report</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 2rem 1rem;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; color: #f0f6fc; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 0.5rem; color: #58a6ff; border-bottom: 1px solid #21262d; padding-bottom: 0.25rem; }
+  h3 { font-size: 1.05rem; margin: 1.25rem 0 0.25rem; color: #f0f6fc; }
+  p { margin: 0.5rem 0; }
+  a { color: #58a6ff; }
+  .sub { color: #8b949e; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  code { background: #161b22; padding: 0.15em 0.4em; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
+  pre { background: #161b22; padding: 1rem; border-radius: 8px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; }
+  th { color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.05em; }
+  tr:hover td { background: #161b22; }
+  blockquote { margin: 1rem 0; padding: 0.5rem 1rem; border-left: 3px solid #58a6ff; background: #161b22; border-radius: 0 6px 6px 0; }
+  .ok, .good { color: #3fb950; }
+  .warn { color: #d29922; }
+  .bad, .err { color: #f85149; }
+  .muted { color: #8b949e; }
+  .bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0; }
+  .bar .label { width: 10rem; text-align: right; color: #8b949e; font-size: 0.85rem; flex-shrink: 0; }
+  .bar .track { flex: 1; background: #161b22; border-radius: 4px; height: 1rem; overflow: hidden; }
+  .bar .fill { height: 100%; background: #58a6ff; border-radius: 4px; }
+  .bar .val { width: 4rem; font-size: 0.85rem; color: #e6edf3; flex-shrink: 0; }
+  .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .stat { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 1rem; }
+  .stat .num { font-size: 1.75rem; font-weight: 700; color: #58a6ff; }
+  .stat .lbl { color: #8b949e; font-size: 0.85rem; }
+  ul, ol { padding-left: 1.5rem; }
+  li { margin: 0.25rem 0; }
+  hr { border: none; border-top: 1px solid #21262d; margin: 2rem 0; }
+</style>
+</head>
+<body>
+<main>
+  <!-- Fill in: title, subtitle, then content. Use the classes above for status colors,
+       .bar for simple charts, .card/.grid/.stat for dashboards, tables for comparisons. -->
+  <h1>Report title</h1>
+  <p class="sub">Subtitle / date / context</p>
+
+  <h2>Section</h2>
+  <p>Body text. <code>inline code</code>, <span class="ok">good</span>, <span class="warn">warn</span>, <span class="bad">bad</span>.</p>
+
+  <h2>Comparison</h2>
+  <table>
+    <tr><th>Option</th><th>Pros</th><th>Cons</th></tr>
+    <tr><td>A</td><td>…</td><td>…</td></tr>
+    <tr><td>B</td><td>…</td><td>…</td></tr>
+  </table>
+
+  <h2>Chart</h2>
+  <div class="bar"><span class="label">Item A</span><div class="track"><div class="fill" style="width:80%"></div></div><span class="val">80%</span></div>
+  <div class="bar"><span class="label">Item B</span><div class="track"><div class="fill" style="width:45%"></div></div><span class="val">45%</span></div>
+
+  <h2>Callout</h2>
+  <blockquote>Key takeaway or warning.</blockquote>
+</main>
+</body>
+</html>
