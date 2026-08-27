@@ -96,8 +96,9 @@ check() { # $1=provider
       if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
         echo "OK: ANTHROPIC_API_KEY is set"
         return 0
-      elif [[ -f "$HOME/.claude/.credentials.json" ]]; then
-        echo "OK: claude OAuth login present"
+      elif command -v claude >/dev/null 2>&1 \
+        && claude auth status 2>/dev/null | grep -q '"loggedIn": true'; then
+        echo "OK: claude login present"
         return 0
       else
         echo "NOT AUTHENTICATED: run 'claude login' or set ANTHROPIC_API_KEY"
