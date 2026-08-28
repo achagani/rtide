@@ -14,6 +14,17 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
   keeps a separate output-history index. For research, comparisons, plans, reports,
   and other substantive work, create a purpose-built HTML artifact yourself.
 
+## Visual communication
+- Prefer the clearest visual form for the material: relevant images, maps for
+  places and routes, charts for quantitative patterns, diagrams or timelines for
+  systems and sequences, and tables/cards for structured comparisons.
+- Put useful source and destination links beside the claim, place, or media they
+  support. Give images meaningful alt text and captions where context matters.
+- Make visuals responsive and readable in the tweb pane. A page's layout and CSS
+  must be self-contained; remote source media is allowed when it adds real value.
+- Do not add decorative filler, invent media or sources, or force a visual when
+  concise text communicates the result better.
+
 ## Rendering
 1. Write a self-contained HTML file to `.tweb/<slug>.html`
    (inline CSS, dark theme, no external deps).

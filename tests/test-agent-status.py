@@ -87,6 +87,22 @@ class AgentStatusTests(unittest.TestCase):
         self.assertEqual(page.count(opening), 1)
         self.assertIn("<summary>Request context</summary>", page)
 
+    def test_fallback_renders_images_and_contextual_links(self):
+        body = AGENT.md_to_html(
+            "![Route map](https://example.com/map.png)\n\n"
+            "[Open the source](https://example.com/report)"
+        )
+        self.assertIn('<img src="https://example.com/map.png"', body)
+        self.assertIn('alt="Route map"', body)
+        self.assertIn('<a href="https://example.com/report">Open the source</a>', body)
+
+    def test_fallback_rejects_unsafe_visual_urls(self):
+        body = AGENT.md_to_html(
+            "![Unsafe](javascript:evil) [Bad link](javascript:evil)"
+        )
+        self.assertNotIn("javascript:", body)
+        self.assertNotIn("<img", body)
+
     def test_history_links_to_individual_results(self):
         entries = [{
             "request": "Compare the options", "title": "Recommendation",
