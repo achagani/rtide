@@ -48,10 +48,11 @@ rtide_tweb_prepare() {
         RTIDE_TWEB_MODE=managed
         RTIDE_TWEB_PANE="${matches[0]}"
       elif (( ${#matches[@]} > 1 )); then
+        RTIDE_TWEB_FAILURE=multiple
         printf 'tweb output error: multiple role=tweb panes in %s\n' "$session" >&2
         return 2
       elif [[ "$session" == rtide-* ]]; then
-        printf 'tweb output error: no role=tweb pane in %s\n' "$session" >&2
+        RTIDE_TWEB_FAILURE=missing
         return 2
       fi
     fi
@@ -62,9 +63,32 @@ rtide_tweb_prepare() {
   export RTIDE_TWEB_MODE RTIDE_TWEB_PANE RTIDE_TWEB_SESSION RTIDE_TWEB_CACHE_KEY RTIDE_TWEB_LAST_RENDER
 }
 
+rtide_tweb_queue() {
+  local url="$1" float="${2:-0}" root="${RTIDE_WORKSPACE:-$PWD}" request tmp
+  root=$(realpath "$root" 2>/dev/null || printf '%s' "$root")
+  while [[ -n "$root" && "$root" != / ]]; do
+    if [[ -r "$root/.rtide/tweb-pane" ]]; then
+      request="$root/.rtide/render-request"
+      tmp="$request.$$"
+      printf '%s\n%s\n' "$float" "$url" > "$tmp" || return 1
+      mv -f -- "$tmp" "$request" || return 1
+      printf 'queued render for RTIDE tweb pane\n'
+      return 0
+    fi
+    root=${root%/*}
+    [[ -n "$root" ]] || root=/
+  done
+  return 1
+}
+
 rtide_tweb_show() {
   local url="$1" float="${2:-0}"
-  rtide_tweb_prepare || return
+  if ! rtide_tweb_prepare; then
+    if [[ "${RTIDE_TWEB_FAILURE:-}" == missing ]] && rtide_tweb_queue "$url" "$float"; then
+      return 0
+    fi
+    return 2
+  fi
 
   if [[ "$RTIDE_TWEB_MODE" == managed ]]; then
     tweb navigate --pane "$RTIDE_TWEB_PANE" "$url" || {
@@ -90,6 +114,9 @@ rtide_tweb_show() {
   fi
 
   if [[ ! -t 0 || ! -t 1 ]]; then
+    if rtide_tweb_queue "$url" "$float"; then
+      return 0
+    fi
     printf 'tweb output error: no RTIDE tweb pane; refusing a blocking browser in a noninteractive shell\n' >&2
     return 1
   fi

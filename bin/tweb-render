@@ -33,5 +33,4 @@ if [[ "$FILE" == "-" ]]; then
   exit 0
 fi
 
-rtide_tweb_prepare
 rtide_tweb_show "file://$(realpath "$FILE")" "$FLOAT"

@@ -112,6 +112,17 @@ class AgentStatusTests(unittest.TestCase):
                 f.write("file:///workspace/.tweb/research.html\n")
             self.assertTrue(AGENT.artifact_rendered(marker, before))
 
+    def test_controller_fulfills_workspace_render_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            request = os.path.join(tmp, "render-request")
+            before = AGENT.marker_version(request)
+            with open(request, "w") as f:
+                f.write("0\nfile:///workspace/.tweb/research.html\n")
+            with mock.patch.object(AGENT, "show_and_verify", return_value=True) as show:
+                after = AGENT.fulfill_render_request(request, before)
+            show.assert_called_once_with("file:///workspace/.tweb/research.html")
+            self.assertEqual(after, AGENT.marker_version(request))
+
     def test_custom_artifact_uses_its_authored_title(self):
         with tempfile.TemporaryDirectory() as tmp:
             page = os.path.join(tmp, "field-guide.html")

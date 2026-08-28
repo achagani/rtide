@@ -36,6 +36,9 @@ assert_log 'navigate --pane %9'
 assert_log 'rtide-output-nav'
 assert_no_log 'open '
 
+mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/workspace/subdir"
+printf '%%9\n' > "$TEST_TMP/workspace/.rtide/tweb-pane"
+
 # A harness-provided pane hint survives command sandboxes that strip both tmux
 # variables and change cwd outside the workspace.
 reset_log
@@ -48,10 +51,23 @@ reset_log
 assert_log 'navigate --pane %9'
 assert_no_log 'open '
 
+# If a sandbox can identify the RTIDE session but cannot enumerate pane roles,
+# queue the render for the workspace controller instead of losing the artifact.
+reset_log
+(
+  cd "$TEST_TMP/workspace/subdir"
+  env -u TMUX -u TMUX_PANE FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n' \
+    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html"
+) || fail 'workspace render queue failed'
+grep -Fx '0' "$TEST_TMP/workspace/.rtide/render-request" >/dev/null \
+  || fail 'queued render did not preserve float mode'
+grep -Fx "file://$TEST_TMP/pages/page with spaces.html" \
+  "$TEST_TMP/workspace/.rtide/render-request" >/dev/null \
+  || fail 'queued render did not preserve target'
+assert_no_log 'open '
+
 # Direct tweb split/open attempts from an agent are routed to the registered
 # workspace browser instead of creating a duplicate pane.
-mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/workspace/subdir"
-printf '%%9\n' > "$TEST_TMP/workspace/.rtide/tweb-pane"
 reset_log
 RTIDE_REAL_TWEB="$FIXTURES/tweb" RTIDE_WORKSPACE="$TEST_TMP/workspace" \
   FAKE_SESSION=rtide-alpha FAKE_ROLE=tweb FAKE_PANES='%9 tweb\n' \

@@ -175,6 +175,32 @@ def show_and_verify(target, source_path=None):
     return False
 
 
+def render_request_path():
+    """Workspace-local handoff used when a sandbox cannot access tmux."""
+    return os.path.join(os.getcwd(), ".rtide", "render-request")
+
+
+def fulfill_render_request(path, before):
+    """Render a newly queued target from this controller's tmux context."""
+    version = marker_version(path)
+    if version is None or version == before:
+        return before
+    try:
+        with open(path, encoding="utf-8") as request:
+            float_flag = request.readline().strip() == "1"
+            target = request.readline().strip()
+    except OSError:
+        return before
+    if not target:
+        return version
+    if show_and_verify(target):
+        pane = managed_tweb_pane()
+        if float_flag and pane:
+            subprocess.run(["tweb", "float", "--pane", pane],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return version
+
+
 def status(msg):
     sys.stdout.write(msg + "\n")
     sys.stdout.flush()
@@ -359,6 +385,8 @@ def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
             if session:
                 child_env["RTIDE_TWEB_SESSION_HINT"] = session
         child_env["PATH"] = guard_dir + os.pathsep + child_env.get("PATH", "")
+    request_path = render_request_path()
+    request_version = marker_version(request_path)
     proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
                             stdin=subprocess.DEVNULL, start_new_session=True,
@@ -426,6 +454,7 @@ def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
                 current_activity = tool
         on_tool(current_activity, time.monotonic() - started,
                 queued_ahead + len(queued), reset_prompt)
+        request_version = fulfill_render_request(request_path, request_version)
         reset_prompt = False
         if proc.poll() is not None and not output_open:
             break
