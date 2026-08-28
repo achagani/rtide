@@ -202,6 +202,10 @@ cmd_new() {
 install_session_hooks() {
   local sess="$1" quoted
   printf -v quoted '%q' "$sess"
+  # Creating the detached workspace at an explicit startup size leaves tmux in
+  # `window-size manual`. Return it to client-driven sizing before attach so a
+  # maximize, restore, or terminal resize changes the actual window canvas.
+  tmux set-option -w -t "$sess:work" window-size latest 2>/dev/null || true
   # Terminal maximize/restore changes the tmux window size proportionally.
   # Reapply RTIDE's exact strip height and column split after each client resize.
   tmux set-hook -t "$sess" client-resized \
