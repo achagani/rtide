@@ -193,6 +193,7 @@ class AgentStatusTests(unittest.TestCase):
         ])
         self.assertIn('<a class="outputs" href="history.html">Outputs</a>', viewer)
         self.assertIn('<iframe id="artifact"', viewer)
+        self.assertNotIn("Open ↗", viewer)
         self.assertIn("ArrowLeft", viewer)
         self.assertIn('className=\'dot\'', viewer)
         self.assertIn('file:///two.html', viewer)

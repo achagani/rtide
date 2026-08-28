@@ -582,6 +582,8 @@ def build_viewer_html(entries):
              for e in entries if e.get("url")]
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     page = VIEWER_PAGE.format(items=payload)
+    page = page.replace('<a class="raw" id="raw" href="#">Open ↗</a>', "")
+    page = page.replace("document.getElementById('raw').href=src;", "")
     print_css = ("<style>@media print{*{-webkit-print-color-adjust:exact!important;"
                  "print-color-adjust:exact!important}nav{display:none!important}"
                  "body{display:block!important;background:#090d14!important}"
