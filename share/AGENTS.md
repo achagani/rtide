@@ -50,6 +50,8 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
    — this resolves the tweb pane belonging to the current RTIDE workspace.
 3. Dense content: `tweb-render --float .tweb/<slug>.html`.
 4. Confirm `tweb-render` succeeds. Do not merely say an artifact was produced.
+   Never run `tweb split`, `tweb open`, or restart the tweb daemon inside RTIDE;
+   those commands can create a duplicate browser pane. Always use `tweb-render`.
 5. Live updates: edit the HTML and run `tweb-render` again; it keeps the update in
    the current workspace.
 6. Use `~/rtide/share/template.html` as a technical foundation and the design

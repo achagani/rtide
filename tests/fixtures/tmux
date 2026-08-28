@@ -3,7 +3,11 @@ set -euo pipefail
 
 case "${1:-}" in
   display-message)
-    printf '%s\n' "${FAKE_SESSION:-rtide-test}"
+    if [[ "${*: -1}" == '#{@rtide-role}' ]]; then
+      printf '%s\n' "${FAKE_ROLE:-tweb}"
+    else
+      printf '%s\n' "${FAKE_SESSION:-rtide-test}"
+    fi
     ;;
   list-panes)
     printf '%b' "${FAKE_PANES:-%1 nvim\n%2 agent\n%3 tweb\n}"

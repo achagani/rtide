@@ -35,6 +35,18 @@ TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%
 assert_log 'navigate --pane %9'
 assert_log 'rtide-output-nav'
 assert_no_log 'open '
+
+# Direct tweb split/open attempts from an agent are routed to the registered
+# workspace browser instead of creating a duplicate pane.
+mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/workspace/subdir"
+printf '%%9\n' > "$TEST_TMP/workspace/.rtide/tweb-pane"
+reset_log
+RTIDE_REAL_TWEB="$FIXTURES/tweb" RTIDE_WORKSPACE="$TEST_TMP/workspace" \
+  FAKE_SESSION=rtide-alpha FAKE_ROLE=tweb FAKE_PANES='%9 tweb\n' \
+  "$ROOT/bin/guard-bin/tweb" split "file://$TEST_TMP/pages/page with spaces.html" \
+  || fail 'guarded split routing failed'
+assert_log 'navigate --pane %9'
+assert_no_log 'split '
 grep -F "file://$TEST_TMP/pages/page with spaces.html" \
   "$HOME/.cache/rtide/rtide-alpha/last-render" >/dev/null \
   || fail 'managed render did not record its target'
@@ -47,8 +59,6 @@ assert_log 'float --pane %9'
 
 # Sandboxed harness commands may have no tmux environment. Resolve the stable
 # pane registration by walking upward from their workspace cwd.
-mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/workspace/subdir"
-printf '%%9\n' > "$TEST_TMP/workspace/.rtide/tweb-pane"
 reset_log
 (
   cd "$TEST_TMP/workspace/subdir"

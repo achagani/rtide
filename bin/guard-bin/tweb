@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# RTIDE harness guard: preserve the workspace's one registered browser pane.
+set -euo pipefail
+
+REAL_TWEB="${RTIDE_REAL_TWEB:-}"
+[[ -x "$REAL_TWEB" ]] || { echo "tweb guard: real tweb binary unavailable" >&2; exit 127; }
+
+root=$(realpath "${RTIDE_WORKSPACE:-$PWD}" 2>/dev/null || pwd)
+registration=""
+while [[ "$root" != / ]]; do
+  if [[ -r "$root/.rtide/tweb-pane" ]]; then
+    registration="$root/.rtide/tweb-pane"
+    break
+  fi
+  root=${root%/*}; [[ -n "$root" ]] || root=/
+done
+
+pane=""
+[[ -n "$registration" ]] && read -r pane < "$registration" || true
+role=""
+[[ -n "$pane" ]] && role=$(tmux display-message -p -t "$pane" '#{@rtide-role}' 2>/dev/null || true)
+
+record_render() {
+  local target="$1" session key marker
+  session=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
+  [[ -n "$session" ]] || return 0
+  key=${session//[^a-zA-Z0-9_.-]/_}
+  marker="$HOME/.cache/rtide/$key/last-render"
+  mkdir -p "$(dirname "$marker")"
+  printf '%s\n' "$target" > "$marker"
+}
+
+if [[ "$role" == tweb ]]; then
+  case "${1:-}" in
+    split|open)
+      [[ " ${*:-} " == *" --help "* ]] && exec "$REAL_TWEB" "$@"
+      target="${*: -1}"
+      if [[ "$target" == file://* || "$target" == http://* || "$target" == https://* ]]; then
+        echo "tweb guard: routing ${1} to registered pane $pane" >&2
+        record_render "$target"
+        exec "$REAL_TWEB" navigate --pane "$pane" "$target"
+      fi
+      ;;
+    navigate)
+      target="${*: -1}"
+      if [[ "$target" == file://* || "$target" == http://* || "$target" == https://* ]]; then
+        record_render "$target"
+      fi
+      ;;
+    daemon)
+      if [[ "${2:-}" == stop || "${2:-}" == restart ]]; then
+        echo "tweb guard: refusing daemon ${2} inside RTIDE; use tweb-render" >&2
+        exit 2
+      fi
+      ;;
+  esac
+fi
+
+exec "$REAL_TWEB" "$@"

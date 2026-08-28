@@ -123,7 +123,7 @@ class AgentStatusTests(unittest.TestCase):
         page = AGENT.build_result_html(
             "Explain the behavior", opening + "\n\nMore detail follows.", "demo", 2
         )
-        self.assertIn("<h1>Explain the behavior</h1>", page)
+        self.assertNotIn("<h1>", page)
         self.assertNotIn(f"<h1>{opening}</h1>", page)
         self.assertEqual(page.count(opening), 1)
         self.assertIn("<summary>Request context</summary>", page)
@@ -165,6 +165,8 @@ class AgentStatusTests(unittest.TestCase):
         }]
         page = AGENT.build_history_html(entries, "demo")
         self.assertIn('class="card artifact"', page)
+        self.assertIn('data-filter="artifact"', page)
+        self.assertIn('data-kind="artifact"', page)
         self.assertIn("1 outputs · 1 artifacts", page)
         self.assertIn("Big Meadows — Field Guide", page)
 
@@ -178,6 +180,8 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn("ArrowLeft", viewer)
         self.assertIn('className=\'dot\'', viewer)
         self.assertIn('file:///two.html', viewer)
+        self.assertIn('data-mode="artifact"', viewer)
+        self.assertIn('contentWindow.print()', viewer)
 
 
 if __name__ == "__main__":

@@ -22,7 +22,8 @@ you need to work in it. New workspaces start with keyboard focus in this prompt.
 While a turn is running, plain text queues a follow-up and the status shows `qN`.
 Use `/steer <message>` to interrupt and resume the same session with new direction,
 `/interrupt` to stop, `/resend` to repeat the last message, and `/queue` to inspect
-the queue count (`/help` prints this reminder in the prompt).
+the queue count (`/help` prints this reminder in the prompt). Pressing `/` on an
+empty prompt opens a selectable command overlay; use Up/Down, Enter, or Escape.
 
 ## What you get
 
@@ -42,6 +43,8 @@ the queue count (`/help` prints this reminder in the prompt).
   `hermes chat -q` / `opencode run`). Every turn opens as its own designed tweb
   result; a separate visual history index links all prior results and custom artifacts
   through a persistent viewer with clickable position dots and Left/Right arrow navigation.
+  Both the archive and viewer can filter All / Artifacts / Responses; the viewer
+  offers PDF export, and Actions → Export output PDF saves a clean file directly.
 - **Files in the editor** — files the agent creates or edits open in the nvim pane
   via `rtide-open <path>` (a convention the agent follows)
 - **Agent-independent memory** — one store every agent reads and writes through the
@@ -123,6 +126,7 @@ rtide layout-reset [session] → restore nvim 40%, tweb 60%, and the three-line 
 rtide nvim [toggle|hide|show] [session] → collapse or restore the editor pane
 rtide menu       → open the quick-switcher menu for a session (prefix+A)
 rtide history    → open the current workspace's browsable output history
+rtide pdf [session] [path] → export the current artifact/output to PDF
 rtide auth       → check auth for the configured provider
 rtide matrix     → print the provider×harness compatibility matrix
 rtide setup      → re-run the wizard

@@ -15,6 +15,8 @@
 #   rtide layout-reset → restore the default 40/60 panes and three-line prompt
 #   rtide menu       → quick-switcher menu (prefix+A)
 #   rtide history    → open the current workspace's output history
+#   rtide slash-menu → contextual slash-command picker for the prompt pane
+#   rtide pdf        → export the current output/artifact to PDF
 #   rtide auth       → check auth for the configured provider
 #   rtide matrix     → print the provider×harness compatibility matrix
 #   rtide setup      → re-run the wizard
@@ -665,6 +667,7 @@ cmd_menu() {
     "Zoom agent"       a "run-shell 'rtide zoom agent'" \
     "Config…"          c "display-popup -E -w 70% -h 50% 'sh -c \"rtide config; echo; read -p done\"'" \
     "Output history"   h "run-shell 'rtide history ${sess}'" \
+    "Export output PDF" p "display-popup -E -w 72% -h 20% 'sh -c \"rtide pdf ${sess}; echo; read -p done\"'" \
     "Sweep memories"   s "run-shell 'rtide sweep'" \
     "" \
     "Detach"           d "detach-client" \
@@ -688,12 +691,63 @@ cmd_history() {
   exit 0
 }
 
+cmd_pdf() {
+  local sess="${2:-}" requested="${3:-}" tweb nvim dir status current target name out
+  [[ -n "$sess" ]] || sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+  [[ -n "$sess" ]] && tmux has-session -t "$sess" 2>/dev/null \
+    || { echo "pdf: no workspace session" >&2; exit 1; }
+  tweb=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' | awk '$2=="tweb"{print $1; exit}')
+  nvim=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' | awk '$2=="nvim"{print $1; exit}')
+  [[ -n "$tweb" ]] || { echo "pdf: no tweb pane" >&2; exit 1; }
+  dir=$(tmux display-message -p -t "${nvim:-$tweb}" '#{pane_current_path}')
+  status=$(tweb status --pane "$tweb")
+  current=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["url"] for x in d["tabs"]["tabs"] if x.get("active")))' <<<"$status")
+  target=$(python3 -c 'import sys,urllib.parse as u; x=sys.argv[1]; print(u.parse_qs(u.urlparse(x).query).get("src",[x])[0])' "$current")
+  name=$(python3 -c 'import sys,urllib.parse as u,pathlib,re; p=pathlib.PurePosixPath(u.urlparse(sys.argv[1]).path).stem; print(re.sub(r"[^A-Za-z0-9._-]+","-",p).strip("-") or "output")' "$target")
+  if [[ -n "$requested" ]]; then
+    out=$(realpath -m "$requested")
+  else
+    mkdir -p "$dir/exports"
+    out="$dir/exports/${name}-$(date +%Y%m%d-%H%M%S).pdf"
+  fi
+  tweb navigate --pane "$tweb" "$target" >/dev/null
+  tweb pdf --pane "$tweb" "$out" >/dev/null
+  [[ "$current" == "$target" ]] || tweb navigate --pane "$tweb" "$current" >/dev/null
+  echo "pdf: $out"
+  exit 0
+}
+
+cmd_slash_menu() {
+  local pane="${2:-${TMUX_PANE:-}}" role line
+  [[ -n "$pane" ]] || exit 1
+  role=$(tmux display-message -p -t "$pane" '#{@rtide-role}' 2>/dev/null || true)
+  line=$(tmux capture-pane -p -t "$pane" -S -1 2>/dev/null | tail -1)
+  if [[ "$role" != agent || ! "$line" =~ ^\>\ *$ ]]; then
+    tmux send-keys -t "$pane" -l '/'
+    exit 0
+  fi
+  tmux display-menu -t "$pane" -T "#[align=centre] Prompt commands" -x 2 -y C \
+    "Steer current turn…" s "send-keys -t '$pane' -l '/steer '" \
+    "Interrupt current turn" i "send-keys -t '$pane' -l '/interrupt'; send-keys -t '$pane' Enter" \
+    "Queue count" q "send-keys -t '$pane' -l '/queue'; send-keys -t '$pane' Enter" \
+    "Resend last message" r "send-keys -t '$pane' -l '/resend'; send-keys -t '$pane' Enter" \
+    "Show command help" h "send-keys -t '$pane' -l '/help'; send-keys -t '$pane' Enter"
+  exit 0
+}
+
 # Bind a key in the prefix table only if it's not already bound (don't clobber)
 bind_if_free() {
   local key="$1" cmd="$2"
   if ! tmux list-keys -T prefix 2>/dev/null \
     | awk -v k="$key" '$1=="bind-key" && $4==k {found=1} END {exit !found}'; then
     tmux bind-key "$key" "$cmd"
+  fi
+}
+
+bind_slash_menu() {
+  if ! tmux list-keys -T root 2>/dev/null | awk '$1=="bind-key" && $4=="/"{found=1} END{exit !found}'; then
+    tmux bind-key -n / if-shell -F '#{==:#{@rtide-role},agent}' \
+      "run-shell 'rtide slash-menu #{pane_id}'" "send-keys /"
   fi
 }
 
@@ -715,6 +769,8 @@ case "${1:-}" in
   nvim)   cmd_nvim "$@" ;;
   menu)   cmd_menu "$@" ;;
   history) cmd_history "$@" ;;
+  pdf)    cmd_pdf "$@" ;;
+  slash-menu) cmd_slash_menu "$@" ;;
   matrix) "$PROVIDER_BIN" matrix; exit 0 ;;
 esac
 
@@ -872,6 +928,7 @@ bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide qu
 bind_if_free R "run-shell 'rtide refresh #{session_name}'"
 bind_if_free A "run-shell 'rtide menu #{session_name}'"
 bind_if_free e "run-shell 'rtide nvim toggle #{session_name}'"
+bind_slash_menu
 install_session_hooks "$S"
 tmux select-window -t "$S:work"
 # A new workspace opens ready for the user's first request. Existing workspace
