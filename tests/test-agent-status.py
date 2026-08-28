@@ -94,6 +94,19 @@ class AgentStatusTests(unittest.TestCase):
         self.assertEqual(AGENT.classify_live_input("/resend", "last request"),
                          ("queue", "last request"))
 
+    def test_fork_context_seeds_only_the_first_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            context = os.path.join(tmp, "fork-context.md")
+            with open(context, "w") as f:
+                f.write("Inherited conversation")
+            seeded = AGENT.request_with_fork_context("Continue here", None, context)
+            self.assertIn("Inherited conversation", seeded)
+            self.assertTrue(seeded.endswith("Continue here"))
+            self.assertEqual(
+                AGENT.request_with_fork_context("Next turn", "session-1", context),
+                "Next turn",
+            )
+
     def test_codex_command_event_uses_agent_payload(self):
         event = {
             "type": "item.started",

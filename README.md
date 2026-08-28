@@ -47,6 +47,8 @@ speak, press Enter to stop, and the transcript is inserted at the cursor.
 ## What you get
 
 - **One workspace per project** — nvim + tweb + agent strip, launched with `rtide <dir>`
+- **Forkable by default** — non-Git directories are initialized with a baseline
+  commit, enabling isolated conversation forks as sibling worktrees in new tmux windows
 - **Provider + harness selection** — on every new workspace, RTIDE asks which AI
   provider (anthropic / openai / ollama) and which harness (claude / codex / hermes /
   opencode) to use, filtered to compatible combinations and configured to actually talk
@@ -133,6 +135,7 @@ and restarts its agent pane.
 rtide            → pick a workspace to resume or start one (unknown names only search; type `new` or pick `+ new workspace` to create — first run walks through setup)
 rtide <dir>      → launch/attach the workspace for <dir> (prompts for provider/harness/model)
 rtide new        → guided new workspace
+rtide fork [session] [window] [name] → fork into an isolated Git worktree, agent session, and tweb pane in a new tmux window
 rtide switch     → same picker as bare rtide (resume / new)
 rtide ls         → list workspaces
 rtide sweep      → capture pending MEM: memories from every live session
@@ -162,7 +165,7 @@ prefix+r → switch workspace
 prefix+R → refresh workspace layout (apply global config to panes)
 prefix+e → hide/show the nvim editor while keeping tweb and the prompt visible
 prefix+v → dictate; Enter sends the transcript, Shift+Enter inserts it for editing
-prefix+A → actions menu (switch / agent / new / refresh / reset layout / hide editor / zoom / config / output history / sweep / quit)
+prefix+A → actions menu (switch / agent / new / fork conversation / refresh / reset layout / hide editor / zoom / config / output history / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)
 ```

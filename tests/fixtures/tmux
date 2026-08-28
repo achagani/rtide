@@ -5,6 +5,8 @@ case "${1:-}" in
   display-message)
     if [[ "${*: -1}" == '#{@rtide-role}' ]]; then
       printf '%s\n' "${FAKE_ROLE:-tweb}"
+    elif [[ "${*: -1}" == '#{window_id}' ]]; then
+      printf '%s\n' "${FAKE_WINDOW:-@1}"
     else
       printf '%s\n' "${FAKE_SESSION:-rtide-test}"
     fi

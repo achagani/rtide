@@ -68,7 +68,8 @@ def render_marker_path():
     if not pane:
         return None
     result = subprocess.run(
-        ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+        ["tmux", "display-message", "-p", "-t", pane,
+         "#{session_name}-#{window_id}"],
         capture_output=True, text=True,
     )
     if result.returncode != 0 or not result.stdout.strip():
@@ -130,14 +131,14 @@ def managed_tweb_pane():
     pane = os.environ.get("TMUX_PANE", "")
     if not pane:
         return None
-    session = subprocess.run(
-        ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+    window = subprocess.run(
+        ["tmux", "display-message", "-p", "-t", pane, "#{window_id}"],
         capture_output=True, text=True,
     )
-    if session.returncode != 0:
+    if window.returncode != 0:
         return None
     panes = subprocess.run(
-        ["tmux", "list-panes", "-t", f"{session.stdout.strip()}:work",
+        ["tmux", "list-panes", "-t", window.stdout.strip(),
          "-F", "#{pane_id} #{@rtide-role}"], capture_output=True, text=True,
     )
     matches = [line.split()[0] for line in panes.stdout.splitlines()
@@ -270,6 +271,20 @@ def get_run_cmd(harness, provider, model, prompt, session):
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip() or "rtide-provider run failed")
     return out.stdout.strip()
+
+
+def request_with_fork_context(request, session_id, context_path):
+    """Seed only the first turn of a fork with its inherited conversation."""
+    if session_id or not os.path.exists(context_path):
+        return request
+    try:
+        with open(context_path, encoding="utf-8") as context:
+            inherited = context.read().strip()
+    except OSError:
+        return request
+    if not inherited:
+        return request
+    return inherited + "\n\n# New request in this fork\n" + request
 
 
 def parse_line(harness, line):
@@ -631,7 +646,7 @@ def start_reply_server():
     if not pane:
         return "", "", None
     session = subprocess.run(
-        ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+        ["tmux", "display-message", "-p", "-t", pane, "#{pane_id}"],
         capture_output=True, text=True,
     ).stdout.strip()
     token = secrets.token_urlsafe(18)
@@ -640,7 +655,7 @@ def start_reply_server():
         def do_POST(self):
             if self.path == "/pdf/" + token and session:
                 subprocess.Popen(
-                    [os.path.join(SELF_DIR, "rtide"), "pdf", session],
+                    [os.path.join(SELF_DIR, "rtide"), "pdf", pane],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
@@ -835,6 +850,7 @@ def main():
     legacy_history_path = os.path.join(tweb_dir, "agent.html")
     session_file = os.path.join(wdir, ".rtide", "agent-session")
     history_data_path = os.path.join(wdir, ".rtide", "output-history.json")
+    fork_context_path = os.path.join(wdir, ".rtide", "fork-context.md")
     reply_endpoint, pdf_endpoint, reply_server = start_reply_server()
 
     # resume a previous session for this harness, if any
@@ -915,7 +931,10 @@ def main():
         render_before = marker_version(marker)
         last_request = req
         try:
-            cmd = get_run_cmd(harness, provider, model, req, session_id)
+            harness_request = request_with_fork_context(
+                req, session_id, fork_context_path
+            )
+            cmd = get_run_cmd(harness, provider, model, harness_request, session_id)
             text, sid, rc, newly_queued, steer, interrupted = run_harness(
                 cmd, harness, working_status, last_request, len(pending)
             )

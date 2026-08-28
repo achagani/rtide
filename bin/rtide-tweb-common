@@ -34,15 +34,16 @@ rtide_tweb_prepare() {
   fi
 
   if [[ -n "$anchor_pane" ]]; then
-    local session pane role
+    local session window pane role
     local -a matches=()
     session=$(tmux display-message -p -t "$anchor_pane" '#{session_name}' 2>/dev/null || true)
+    window=$(tmux display-message -p -t "$anchor_pane" '#{window_id}' 2>/dev/null || true)
     [[ -n "$session" ]] || session="$session_hint"
     if [[ -n "$session" ]]; then
       RTIDE_TWEB_SESSION="$session"
       while read -r pane role; do
         [[ "$role" == tweb ]] && matches+=("$pane")
-      done < <(tmux list-panes -t "$session:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null || true)
+      done < <(tmux list-panes -t "${window:-$session:work}" -F '#{pane_id} #{@rtide-role}' 2>/dev/null || true)
 
       if (( ${#matches[@]} == 1 )); then
         RTIDE_TWEB_MODE=managed
@@ -58,7 +59,8 @@ rtide_tweb_prepare() {
     fi
   fi
 
-  RTIDE_TWEB_CACHE_KEY=${RTIDE_TWEB_SESSION//[^a-zA-Z0-9_.-]/_}
+  RTIDE_TWEB_CACHE_KEY="${RTIDE_TWEB_SESSION}-${window:-work}"
+  RTIDE_TWEB_CACHE_KEY=${RTIDE_TWEB_CACHE_KEY//[^a-zA-Z0-9_.-]/_}
   RTIDE_TWEB_LAST_RENDER="$HOME/.cache/rtide/$RTIDE_TWEB_CACHE_KEY/last-render"
   export RTIDE_TWEB_MODE RTIDE_TWEB_PANE RTIDE_TWEB_SESSION RTIDE_TWEB_CACHE_KEY RTIDE_TWEB_LAST_RENDER
 }

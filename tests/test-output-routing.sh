@@ -76,7 +76,7 @@ RTIDE_REAL_TWEB="$FIXTURES/tweb" RTIDE_WORKSPACE="$TEST_TMP/workspace" \
 assert_log 'navigate --pane %9'
 assert_no_log 'split '
 grep -F "file://$TEST_TMP/pages/page with spaces.html" \
-  "$HOME/.cache/rtide/rtide-alpha/last-render" >/dev/null \
+  "$HOME/.cache/rtide/rtide-alpha-_1/last-render" >/dev/null \
   || fail 'managed render did not record its target'
 
 # Float must target the same pane instead of relying on global inference.
@@ -118,7 +118,7 @@ reset_log
 printf '<script>alert("x")</script>&\n' | \
   TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%9 tweb\n' \
   "$ROOT/bin/tweb-render" - || fail 'piped render failed'
-PIPE_FILE="$HOME/.cache/rtide/rtide-alpha/pipe.html"
+PIPE_FILE="$HOME/.cache/rtide/rtide-alpha-_1/pipe.html"
 grep -F '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;' "$PIPE_FILE" >/dev/null \
   || fail 'piped HTML was not escaped'
 
@@ -126,7 +126,7 @@ grep -F '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;' "$PIPE_FILE" >/
 reset_log
 TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-beta FAKE_PANES='%7 tweb\n' \
   "$ROOT/bin/tweb-run" /bin/sh -c 'printf "<b>bad & raw</b>"; exit 7' || fail 'command report render failed'
-RUN_FILE="$HOME/.cache/rtide/rtide-beta/run.html"
+RUN_FILE="$HOME/.cache/rtide/rtide-beta-_1/run.html"
 grep -F '&lt;b&gt;bad &amp; raw&lt;/b&gt;' "$RUN_FILE" >/dev/null || fail 'command output was not escaped'
 grep -F 'exit 7' "$RUN_FILE" >/dev/null || fail 'command exit status was not recorded'
 assert_log 'navigate --pane %7'
