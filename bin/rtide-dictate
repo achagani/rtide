@@ -6,11 +6,47 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import termios
+import tty
 
 
 def fail(message):
     print(f"dictation: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def wait_for_stop():
+    """Return True for Enter (submit), False for Shift+Enter (insert only)."""
+    if not sys.stdin.isatty():
+        input()
+        return True
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    sequence = b""
+    try:
+        tty.setraw(fd)
+        while True:
+            key = os.read(fd, 1)
+            if not key:
+                return True
+            if key == b"\x03":
+                raise KeyboardInterrupt
+            sequence += key
+            if sequence in (b"\r", b"\n"):
+                return True
+            if sequence.startswith(b"\x1b[") and sequence[-1:] in (b"u", b"~"):
+                # tmux extended-keys-format=csi-u reports Shift+Enter as
+                # CSI 13;2u (some terminals use CSI 27;2;13~).
+                if sequence in (b"\x1b[13;2u", b"\x1b[27;2;13~"):
+                    return False
+                if sequence == b"\x1b[13u":
+                    return True
+                sequence = b""
+                continue
+            if len(sequence) > 24 or not b"\x1b[".startswith(sequence):
+                sequence = b""
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
 
 
 pane = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TMUX_PANE", "")
@@ -58,11 +94,11 @@ with tempfile.TemporaryDirectory(prefix="rtide-dictate-") as tmp:
         cmd = [recorder, "--rate", "16000", "--channels", "1", audio]
     else:
         cmd = [recorder, "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", audio]
-    print("● Listening — speak; Enter stops")
+    print("● Listening — Enter sends · Shift+Enter inserts")
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             start_new_session=True)
     try:
-        input()
+        submit = wait_for_stop()
     finally:
         proc.terminate()
         try:
@@ -86,5 +122,8 @@ with tempfile.TemporaryDirectory(prefix="rtide-dictate-") as tmp:
     subprocess.run(["tmux", "set-buffer", "--", text], check=True)
     subprocess.run(["tmux", "paste-buffer", "-t", pane], check=True)
     subprocess.run(["tmux", "send-keys", "-t", pane, "End"], check=True)
+    if submit:
+        subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"], check=True)
     subprocess.run(["tmux", "select-pane", "-t", pane], check=True)
-    print(f"✓ inserted {len(text.split())} words")
+    action = "submitted" if submit else "inserted"
+    print(f"✓ {action} {len(text.split())} words")

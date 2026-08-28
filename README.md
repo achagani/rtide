@@ -145,7 +145,7 @@ prefix+a → zoom agent
 prefix+r → switch workspace
 prefix+R → refresh workspace layout (apply global config to panes)
 prefix+e → hide/show the nvim editor while keeping tweb and the prompt visible
-prefix+v → dictate into the prompt (press Enter to stop recording)
+prefix+v → dictate; Enter sends the transcript, Shift+Enter inserts it for editing
 prefix+A → actions menu (switch / agent / new / refresh / reset layout / hide editor / zoom / config / output history / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)

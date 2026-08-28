@@ -770,6 +770,8 @@ bind_slash_menu() {
 }
 
 bind_dictation() {
+  tmux set-option -s extended-keys on 2>/dev/null || true
+  tmux set-option -s extended-keys-format csi-u 2>/dev/null || true
   tmux bind-key v display-popup -E -x 2 -w 38% -h 25% \
     "sh -c 'rtide-dictate \"#{pane_id}\"; rc=\$?; [ \$rc -eq 0 ] || read -p \"press Enter to close\"; exit \$rc'"
 }
