@@ -62,10 +62,12 @@ class AgentStatusTests(unittest.TestCase):
             AGENT.working_status("@note researching", 2, 0, reset_prompt=True)
         plain = ANSI.sub("", out.getvalue())
         self.assertIn("working 2s", plain)
-        self.assertTrue(plain.endswith("\n╰─❯ "))
+        self.assertIn("\n╰─❯ ", plain)
+        self.assertIn("🎙 voice", plain)
 
     def test_prompt_uses_readline_line_editor(self):
         self.assertIn("╰─❯", AGENT.PROMPT)
+        self.assertIn("🎙 voice", AGENT.PROMPT)
         self.assertTrue(callable(AGENT.readline.redisplay))
 
     def test_request_context_is_expanded_by_default(self):

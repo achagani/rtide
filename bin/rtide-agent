@@ -37,8 +37,10 @@ BLUE = "\033[34m"
 MAGENTA = "\033[35m"
 DIM = "\033[2m"
 RESET = "\033[0m"
-PROMPT = f"\001{CYAN}\002╰─❯\001{RESET}\002 "
-PROMPT_PLAIN = "╰─❯ "
+VOICE_CONTROL = f"\0337\033[999C\033[10D{MAGENTA}🎙 voice{RESET}\0338"
+PROMPT = (f"\001{CYAN}\002╰─❯\001{RESET}\002 "
+          f"\001{VOICE_CONTROL}\002")
+PROMPT_PLAIN = "╰─❯ " + VOICE_CONTROL
 
 # Turn input() into a real line editor: cursor movement, word movement, and
 # insertion at the cursor instead of an append/backspace-only cooked line.

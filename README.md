@@ -152,7 +152,7 @@ prefix+z → zoom any pane  (tmux default)
 ```
 
 Mouse mode is enabled for RTIDE: click a pane to focus it, or drag a pane border
-to resize it.
+to resize it. The right side of the prompt also has a clickable `🎙 voice` control.
 
 **Applying settings** — layout settings (`agent_lines`, `tweb_pct`, `shell`) live only in
 `~/.rtide/config`: the single source of truth, read at launch. `rtide refresh` re-reads it

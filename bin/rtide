@@ -776,6 +776,15 @@ bind_dictation() {
     "sh -c 'rtide-dictate \"#{pane_id}\"; rc=\$?; [ \$rc -eq 0 ] || read -p \"press Enter to close\"; exit \$rc'"
 }
 
+bind_voice_click() {
+  # Keep ordinary click-to-focus behavior everywhere except the visible voice
+  # control in the prompt pane's rightmost columns.
+  tmux bind-key -n MouseDown1Pane if-shell -F \
+    '#{&&:#{==:#{@rtide-role},agent},#{>=:#{mouse_x},#{-:#{+:#{pane_left},#{pane_width}},12}}}' \
+    "display-popup -E -x 2 -w 38% -h 25% 'sh -c \"rtide-dictate #{pane_id}; rc=\\\$?; [ \\\$rc -eq 0 ] || read -p \\\"press Enter to close\\\"; exit \\\$rc\"'" \
+    'select-pane -t =; send-keys -M'
+}
+
 case "${1:-}" in
   setup)  setup_wizard; exit 0 ;;
   doctor) cmd_doctor; exit 0 ;;
@@ -949,6 +958,7 @@ fi
 bind_if_free t "run-shell 'rtide zoom tweb'"
 bind_if_free a "run-shell 'rtide zoom agent'"
 bind_dictation
+bind_voice_click
 bind_if_free r "run-shell 'rtide switch'"
 bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
 bind_if_free R "run-shell 'rtide refresh #{session_name}'"
