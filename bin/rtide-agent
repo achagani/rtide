@@ -189,7 +189,7 @@ def activity(event=None):
     return raw, CYAN
 
 
-def working_status(tool=None, elapsed=0, queued=0):
+def working_status(tool=None, elapsed=0, queued=0, reset_prompt=False):
     detail, color = activity(tool)
     timer = f"{int(elapsed)}s"
     # ANSI sequences do not consume columns. Budget using only visible text,
@@ -200,11 +200,15 @@ def working_status(tool=None, elapsed=0, queued=0):
     room = max(0, width - len(prefix) - (3 if detail else 0))
     detail = detail[:room].rstrip()
     suffix = f" {DIM}·{RESET} {color}{detail}{RESET}" if detail else ""
-    # Timer ticks and activity events replace the same physical line.
-    sys.stdout.write(
-        f"\r\033[2K{YELLOW}●{RESET} working {CYAN}{timer}{RESET}"
-        f"{MAGENTA}{queue}{RESET}{suffix}"
-    )
+    line = (f"{YELLOW}●{RESET} working {CYAN}{timer}{RESET}"
+            f"{MAGENTA}{queue}{RESET}{suffix}")
+    if reset_prompt:
+        # Keep a discoverable input line beneath the live status. This also
+        # clears a submitted queue/steer command before drawing the next prompt.
+        sys.stdout.write(f"\033[2J\033[H{line}\n> ")
+    else:
+        # Update the status one row above without moving the user's typing cursor.
+        sys.stdout.write(f"\0337\r\033[1A\033[2K{line}\0338")
     sys.stdout.flush()
 
 
@@ -338,6 +342,7 @@ def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
     steer = None
     interrupted = False
     output_open = True
+    reset_prompt = False
     while True:
         events = stream.select(timeout=0.2)
         for key, _ in events:
@@ -348,6 +353,7 @@ def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
                     stream.unregister(sys.stdin)
                     continue
                 action, payload = classify_live_input(line, last_request)
+                reset_prompt = True
                 if action == "queue" and payload:
                     queued.append(payload)
                     current_activity = f"@note queued follow-up ({queued_ahead + len(queued)})"
@@ -387,7 +393,8 @@ def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
             if tool:
                 current_activity = tool
         on_tool(current_activity, time.monotonic() - started,
-                queued_ahead + len(queued))
+                queued_ahead + len(queued), reset_prompt)
+        reset_prompt = False
         if proc.poll() is not None and not output_open:
             break
     stream.close()
@@ -684,7 +691,7 @@ def main():
                 continue
 
         clear()
-        working_status(elapsed=0, queued=len(pending))
+        working_status(elapsed=0, queued=len(pending), reset_prompt=True)
         t0 = time.time()
         marker = render_marker_path()
         render_before = marker_version(marker)

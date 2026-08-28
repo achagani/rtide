@@ -17,7 +17,7 @@ LOADER = importlib.machinery.SourceFileLoader("rtide_agent", AGENT_PATH)
 SPEC = importlib.util.spec_from_loader("rtide_agent", LOADER)
 AGENT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AGENT)
-ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+ANSI = re.compile(r"\x1b(?:\[[0-9;]*[A-Za-z]|[78])")
 
 
 class AgentStatusTests(unittest.TestCase):
@@ -55,6 +55,14 @@ class AgentStatusTests(unittest.TestCase):
         plain = ANSI.sub("", out.getvalue())
         self.assertIn("working 9s", plain)
         self.assertIn("q3", plain)
+
+    def test_working_state_keeps_visible_prompt(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            AGENT.working_status("@note researching", 2, 0, reset_prompt=True)
+        plain = ANSI.sub("", out.getvalue())
+        self.assertIn("working 2s", plain)
+        self.assertTrue(plain.endswith("\n> "))
 
     def test_live_input_controls(self):
         self.assertEqual(AGENT.classify_live_input("follow up"),
