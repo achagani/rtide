@@ -12,6 +12,7 @@
 #   rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 #   rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
 #   rtide nvim       → hide/show the editor pane while keeping tweb + prompt visible
+#   rtide layout-reset → restore the default 40/60 panes and three-line prompt
 #   rtide menu       → quick-switcher menu (prefix+A)
 #   rtide history    → open the current workspace's output history
 #   rtide auth       → check auth for the configured provider
@@ -616,6 +617,33 @@ cmd_nvim() {
   cmd_refresh refresh "$sess"
 }
 
+cmd_layout_reset() {
+  local sess="${2:-}" agent tweb
+  [[ -n "$sess" ]] || sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+  [[ -n "$sess" ]] && tmux has-session -t "$sess" 2>/dev/null \
+    || { echo "layout-reset: no workspace session" >&2; exit 1; }
+  # Reset the complete presentation state while preserving shell, agent
+  # selection, and unrelated preferences.
+  "$0" config set agent_lines=3 tweb_pct=60 >/dev/null
+  tmux set-option -u -t "$sess" @rtide-nvim-hidden 2>/dev/null || true
+  tmux set-option -g mouse on
+  "$0" refresh "$sess" >/dev/null
+  agent=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+    | awk '$2=="agent"{print $1; exit}')
+  tweb=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+    | awk '$2=="tweb"{print $1; exit}')
+  if [[ -n "$tweb" ]]; then
+    tweb pin --pane "$tweb" >/dev/null 2>&1 || true
+    tweb eval --pane "$tweb" \
+      "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; window.dispatchEvent(new Event('resize')); true" \
+      >/dev/null 2>&1 || true
+  fi
+  tmux select-window -t "$sess:work"
+  [[ -n "$agent" ]] && tmux select-pane -t "$agent"
+  echo "layout: $sess — default nvim 40%, tweb 60%, prompt 3L, tweb pinned"
+  exit 0
+}
+
 # Open the workspace quick-switcher menu (prefix+A). Interactive items run in a
 # display-popup so fzf pickers get a tty; the rest run directly via run-shell.
 #   rtide menu [session]   (no arg → current session)
@@ -631,6 +659,7 @@ cmd_menu() {
     "New workspace…"   n "display-popup -E -w 80% -h 70% 'rtide new'" \
     "" \
     "Refresh layout"   R "run-shell 'rtide refresh ${sess}'" \
+    "Reset pane layout" 0 "run-shell 'rtide layout-reset ${sess}'" \
     "Hide/show editor" e "run-shell 'rtide nvim toggle ${sess}'" \
     "Zoom tweb"        t "run-shell 'rtide zoom tweb'" \
     "Zoom agent"       a "run-shell 'rtide zoom agent'" \
@@ -682,6 +711,7 @@ case "${1:-}" in
   auth)   cmd_auth "$@" ;;
   config) cmd_config "$@" ;;
   refresh) cmd_refresh "$@" ;;
+  layout-reset) cmd_layout_reset "$@" ;;
   nvim)   cmd_nvim "$@" ;;
   menu)   cmd_menu "$@" ;;
   history) cmd_history "$@" ;;

@@ -114,6 +114,7 @@ rtide kill [dir] → alias for quit
 rtide agent      → re-pick provider/harness/model for the current workspace
 rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
+rtide layout-reset [session] → restore nvim 40%, tweb 60%, and the three-line prompt
 rtide nvim [toggle|hide|show] [session] → collapse or restore the editor pane
 rtide menu       → open the quick-switcher menu for a session (prefix+A)
 rtide history    → open the current workspace's browsable output history
@@ -132,7 +133,7 @@ prefix+a → zoom agent
 prefix+r → switch workspace
 prefix+R → refresh workspace layout (apply global config to panes)
 prefix+e → hide/show the nvim editor while keeping tweb and the prompt visible
-prefix+A → actions menu (switch / agent / new / refresh / hide editor / zoom / config / output history / sweep / quit)
+prefix+A → actions menu (switch / agent / new / refresh / reset layout / hide editor / zoom / config / output history / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)
 ```
@@ -149,6 +150,7 @@ restored, or otherwise resized.
 | You want to… | Do this |
 |---|---|
 | Refresh current workspace's layout | `prefix+R` — any pane in the workspace |
+| Restore the default pane layout | Actions → Reset pane layout, or `rtide layout-reset` |
 | Hide/show the editor | `prefix+e` or Actions → Hide/show editor |
 | From a shell inside the workspace | `rtide refresh` (resolves the current session) |
 | From outside tmux | `rtide refresh <dir-or-session>` |
