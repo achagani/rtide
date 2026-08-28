@@ -693,7 +693,7 @@ cmd_history() {
 }
 
 cmd_pdf() {
-  local sess="${2:-}" requested="${3:-}" tweb nvim dir status current target name out
+  local sess="${2:-}" requested="${3:-}" tweb nvim dir status current target name out capture_dir
   [[ -n "$sess" ]] || sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
   [[ -n "$sess" ]] && tmux has-session -t "$sess" 2>/dev/null \
     || { echo "pdf: no workspace session" >&2; exit 1; }
@@ -707,15 +707,29 @@ cmd_pdf() {
   name=$(python3 -c 'import sys,urllib.parse as u,pathlib,re; p=pathlib.PurePosixPath(u.urlparse(sys.argv[1]).path).stem; print(re.sub(r"[^A-Za-z0-9._-]+","-",p).strip("-") or "output")' "$target")
   if [[ -n "$requested" ]]; then
     out=$(realpath -m "$requested")
+    mkdir -p "$(dirname "$out")"
   else
     mkdir -p "$dir/exports"
     out="$dir/exports/${name}-$(date +%Y%m%d-%H%M%S).pdf"
   fi
   tweb navigate --pane "$tweb" "$target" >/dev/null
-  tweb eval --pane "$tweb" \
-    "(()=>{const s=document.createElement('style');s.textContent='@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}';document.head.appendChild(s);return true})()" \
-    >/dev/null 2>&1 || true
-  tweb pdf --pane "$tweb" "$out" >/dev/null
+  # Chromium print-to-PDF can drop backgrounds and clip tall local artifacts.
+  # Capture the complete rendered document and wrap that exact visual in one
+  # continuous PDF page instead. This preserves every color and every pixel.
+  capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/rtide-pdf.XXXXXX")
+  if command -v magick >/dev/null 2>&1 \
+      && tweb full-screenshot --pane "$tweb" "$capture_dir/output.png" >/dev/null \
+      && magick "$capture_dir/output.png" -units PixelsPerInch -density 144 "$out"; then
+    :
+  else
+    find "$capture_dir" -type f -delete 2>/dev/null || true
+    rmdir "$capture_dir" 2>/dev/null || true
+    [[ "$current" == "$target" ]] || tweb navigate --pane "$tweb" "$current" >/dev/null
+    echo "pdf: exact export requires tweb full-screenshot and ImageMagick" >&2
+    exit 1
+  fi
+  find "$capture_dir" -type f -delete
+  rmdir "$capture_dir"
   [[ "$current" == "$target" ]] || tweb navigate --pane "$tweb" "$current" >/dev/null
   echo "pdf: $out"
   exit 0
