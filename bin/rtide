@@ -778,11 +778,13 @@ bind_dictation() {
 
 bind_voice_click() {
   # Keep ordinary click-to-focus behavior everywhere except the visible voice
-  # control in the prompt pane's rightmost columns.
-  tmux bind-key -n MouseDown1Pane if-shell -F \
+  # control in the prompt pane's rightmost columns. Open on mouse-up so the
+  # release belonging to the click cannot immediately dismiss the popup.
+  tmux bind-key -n MouseDown1Pane "select-pane -t = ; send-keys -M"
+  tmux bind-key -n MouseUp1Pane if-shell -F \
     '#{&&:#{==:#{@rtide-role},agent},#{>=:#{mouse_x},#{-:#{+:#{pane_left},#{pane_width}},12}}}' \
     "display-popup -E -x 2 -w 38% -h 25% 'sh -c \"rtide-dictate #{pane_id}; rc=\\\$?; [ \\\$rc -eq 0 ] || read -p \\\"press Enter to close\\\"; exit \\\$rc\"'" \
-    'select-pane -t =; send-keys -M'
+    'run-shell true'
 }
 
 case "${1:-}" in
