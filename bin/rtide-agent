@@ -120,14 +120,10 @@ def show_and_verify(target, source_path=None):
     for _ in range(3):
         if source_path:
             subprocess.run([TWEB_RENDER, source_path], capture_output=True)
-        elif pane and current_tweb_url(pane) != target:
-            subprocess.run(["tweb", "navigate", "--pane", pane, target],
-                           capture_output=True)
-            subprocess.run(
-                ["tweb", "eval", "--pane", pane,
-                 "document.documentElement.style.zoom='0.9'; true"],
-                capture_output=True,
-            )
+        else:
+            # Route every artifact through the shared renderer so page zoom and
+            # persistent output navigation are applied to custom pages too.
+            subprocess.run([TWEB_RENDER, "--url", target], capture_output=True)
         if current_tweb_url(pane) == target:
             return True
         time.sleep(0.15)

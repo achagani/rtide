@@ -71,6 +71,9 @@ rtide_tweb_show() {
       tweb eval --pane "$RTIDE_TWEB_PANE" \
         "document.documentElement.style.zoom='$page_zoom'; true" >/dev/null || true
     fi
+    # Persistent navigation is injected outside the artifact's own visual
+    # system. Shadow DOM keeps arbitrary page CSS from restyling the controls.
+    tweb eval --pane "$RTIDE_TWEB_PANE" '(()=>{let h=document.getElementById("rtide-output-nav");if(h)h.remove();h=document.createElement("div");h.id="rtide-output-nav";h.style.cssText="position:fixed;z-index:2147483647;top:12px;right:12px;font:600 12px/1 system-ui,sans-serif";const s=h.attachShadow({mode:"open"});const cut=location.href.indexOf("/.tweb/");const out=cut>=0?location.href.slice(0,cut+7)+"history.html":"history.html";s.innerHTML=`<style>*{box-sizing:border-box}.bar{display:flex;align-items:center;gap:2px;padding:4px;border:1px solid #ffffff24;border-radius:12px;background:#0b111be8;box-shadow:0 10px 35px #0008;backdrop-filter:blur(14px)}button,a{height:30px;border:0;border-radius:8px;padding:0 10px;background:transparent;color:#d9e5f5;font:600 12px/1 system-ui,sans-serif;display:grid;place-items:center;text-decoration:none;cursor:pointer}button:hover,a:hover{background:#ffffff12;color:#fff}button:focus-visible,a:focus-visible{outline:2px solid #62d7c7;outline-offset:1px}.outputs{color:#62d7c7}</style><nav class="bar" aria-label="RTIDE output navigation"><button id="back" title="Previous page" aria-label="Previous page">←</button><a class="outputs" href="${out}">Outputs</a><button id="forward" title="Next page" aria-label="Next page">→</button></nav>`;s.getElementById("back").onclick=()=>history.back();s.getElementById("forward").onclick=()=>history.forward();document.body.appendChild(h);return true})()' >/dev/null || true
     mkdir -p "$(dirname "$RTIDE_TWEB_LAST_RENDER")"
     printf '%s\n' "$url" > "$RTIDE_TWEB_LAST_RENDER"
     if [[ "$float" == 1 ]]; then

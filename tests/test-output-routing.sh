@@ -33,6 +33,7 @@ reset_log
 TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%9 tweb\n' \
   "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html" || fail 'managed render failed'
 assert_log 'navigate --pane %9'
+assert_log 'rtide-output-nav'
 assert_no_log 'open '
 grep -F "file://$TEST_TMP/pages/page with spaces.html" \
   "$HOME/.cache/rtide/rtide-alpha/last-render" >/dev/null \
