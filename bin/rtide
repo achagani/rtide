@@ -608,6 +608,7 @@ cmd_history() {
   [[ -f "$page" ]] || { echo "history: no completed outputs yet" >&2; exit 1; }
   tweb navigate --pane "$tweb" "file://$(realpath "$page")"
   tweb eval --pane "$tweb" "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; true" >/dev/null 2>&1 || true
+  exit 0
 }
 
 # Bind a key in the prefix table only if it's not already bound (don't clobber)
