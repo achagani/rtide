@@ -126,9 +126,20 @@ class AgentStatusTests(unittest.TestCase):
             "kind": "designed result",
         }]
         page = AGENT.build_history_html(entries, "demo")
-        self.assertIn("Result history", page)
+        self.assertIn("Output history", page)
         self.assertIn("result-1.html", page)
         self.assertIn("Compare the options", page)
+
+    def test_history_distinguishes_custom_artifacts_compactly(self):
+        entries = [{
+            "request": "Build a trip guide", "title": "Big Meadows — Field Guide",
+            "url": "file:///workspace/.tweb/field-guide.html", "elapsed": 8,
+            "created": "Aug 27 · 23:22", "kind": "custom artifact",
+        }]
+        page = AGENT.build_history_html(entries, "demo")
+        self.assertIn('class="card artifact"', page)
+        self.assertIn("1 outputs · 1 artifacts", page)
+        self.assertIn("Big Meadows — Field Guide", page)
 
 
 if __name__ == "__main__":
