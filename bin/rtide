@@ -200,12 +200,20 @@ cmd_new() {
 }
 
 install_session_hooks() {
-  local sess="$1" quoted
+  local sess="$1" quoted tweb workspace
   printf -v quoted '%q' "$sess"
   # Creating the detached workspace at an explicit startup size leaves tmux in
   # `window-size manual`. Return it to client-driven sizing before attach so a
   # maximize, restore, or terminal resize changes the actual window canvas.
   tmux set-option -w -t "$sess:work" window-size latest 2>/dev/null || true
+  tweb=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+    | awk '$2=="tweb"{print $1; exit}')
+  if [[ -n "$tweb" ]]; then
+    workspace=$(tmux display-message -p -t "$tweb" '#{pane_current_path}' 2>/dev/null || true)
+    if [[ -d "$workspace/.rtide" ]]; then
+      printf '%s\n' "$tweb" > "$workspace/.rtide/tweb-pane"
+    fi
+  fi
   # Terminal maximize/restore changes the tmux window size proportionally.
   # Reapply RTIDE's exact strip height and column split after each client resize.
   tmux set-hook -t "$sess" client-resized \
@@ -530,7 +538,7 @@ cmd_config() {
 # Apply the current global config's layout to a running workspace's panes.
 #   rtide refresh [session|dir]   (no arg → current session; prefix+R passes #{session_name})
 cmd_refresh() {
-  local arg="${2:-}" sess agent tweb w tw changed=""
+  local arg="${2:-}" sess agent tweb workspace w tw changed=""
   if [[ -n "$arg" ]]; then
     # A session name wins; anything else is a directory (basename may itself be rtide-*).
     if tmux has-session -t "$arg" 2>/dev/null; then
@@ -561,6 +569,12 @@ cmd_refresh() {
 
   agent=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="agent"{print $1; exit}')
   tweb=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="tweb"{print $1; exit}')
+  if [[ -n "$tweb" ]]; then
+    workspace=$(tmux display-message -p -t "$tweb" '#{pane_current_path}' 2>/dev/null || true)
+    if [[ -d "$workspace/.rtide" ]]; then
+      printf '%s\n' "$tweb" > "$workspace/.rtide/tweb-pane"
+    fi
+  fi
   w=$(tmux display-message -p -t "$sess:work" '#{window_width}' 2>/dev/null || echo 80)
   tw=$(( w * nvim_pct / 100 )); (( tw < 10 )) && tw=10
 
@@ -746,6 +760,8 @@ tmux split-window -h -t "$NVIM_PANE" -p "$nvim_pct" -c "$DIR"
 TWEB_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')
 tmux set-option -p -t "$TWEB_PANE" @rtide-role tweb
 tmux select-pane -t "$TWEB_PANE" -T tweb
+# Stable routing for harness command runners that do not inherit TMUX_PANE.
+printf '%s\n' "$TWEB_PANE" > "$DIR/.rtide/tweb-pane"
 # generate the per-workspace welcome page, then open it in tweb
 python3 - "$TWEB_DIR/welcome.html" "$DIR/.tweb/welcome.html" "$S" "$DIR" "$provider" "$harness" "$model" <<'PY'
 import sys, datetime

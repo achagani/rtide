@@ -10,10 +10,27 @@ rtide_tweb_prepare() {
   RTIDE_TWEB_PANE=
   RTIDE_TWEB_SESSION=standalone
 
-  if [[ -n "${TMUX_PANE:-}" ]]; then
+  local anchor_pane="${TMUX_PANE:-}"
+  if [[ -z "$anchor_pane" ]]; then
+    # Agent harnesses may intentionally strip TMUX/TMUX_PANE from commands.
+    # Recover the workspace's registered browser pane from the command cwd.
+    local root="${RTIDE_WORKSPACE:-$PWD}" registration
+    root=$(realpath "$root" 2>/dev/null || printf '%s' "$root")
+    while [[ -n "$root" && "$root" != / ]]; do
+      registration="$root/.rtide/tweb-pane"
+      if [[ -r "$registration" ]]; then
+        read -r anchor_pane < "$registration" || true
+        break
+      fi
+      root=${root%/*}
+      [[ -n "$root" ]] || root=/
+    done
+  fi
+
+  if [[ -n "$anchor_pane" ]]; then
     local session pane role
     local -a matches=()
-    session=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null || true)
+    session=$(tmux display-message -p -t "$anchor_pane" '#{session_name}' 2>/dev/null || true)
     if [[ -n "$session" ]]; then
       RTIDE_TWEB_SESSION="$session"
       while read -r pane role; do

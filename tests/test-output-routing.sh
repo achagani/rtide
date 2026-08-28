@@ -44,6 +44,20 @@ TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%
   "$ROOT/bin/tweb-render" --float "$TEST_TMP/pages/page with spaces.html" || fail 'managed float failed'
 assert_log 'float --pane %9'
 
+# Sandboxed harness commands may have no tmux environment. Resolve the stable
+# pane registration by walking upward from their workspace cwd.
+mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/workspace/subdir"
+printf '%%9\n' > "$TEST_TMP/workspace/.rtide/tweb-pane"
+reset_log
+(
+  cd "$TEST_TMP/workspace/subdir"
+  env -u TMUX -u TMUX_PANE FAKE_SESSION=rtide-alpha \
+    FAKE_PANES='%1 nvim\n%2 agent\n%9 tweb\n' \
+    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html"
+) || fail 'workspace registration render failed'
+assert_log 'navigate --pane %9'
+assert_no_log 'open '
+
 # Duplicate role panes are a configuration error and must never spawn a browser.
 reset_log
 if TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%9 tweb\n%10 tweb\n' \

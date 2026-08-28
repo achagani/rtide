@@ -25,6 +25,24 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 - Do not add decorative filler, invent media or sources, or force a visual when
   concise text communicates the result better.
 
+## Art direction
+- Before writing HTML, choose a content-specific visual concept and composition.
+  A travel brief might feel cartographic and topographic; an investigation might
+  read like an editorial dossier; a system explanation might use a technical
+  blueprint. Do not reuse the same dashboard/card-grid treatment by default.
+- Give substantive pages one memorable visual anchor: a useful map, annotated
+  diagram, data composition, timeline, image treatment, or typographic centerpiece.
+  The anchor must communicate information, not merely decorate the page.
+- Compose with rhythm and contrast: mix wide and narrow sections, editorial text
+  blocks, whitespace, scale, layering, and asymmetry where appropriate. Avoid
+  endless rounded rectangles, generic gradient backgrounds, and oversized titles.
+- Use a deliberate type scale, restrained content-led palette, and consistent
+  spacing system. Small details—rules, labels, captions, legends, hover/focus
+  states, and transitions—should reinforce the chosen visual language.
+- Read `~/rtide/share/DESIGN_PLAYBOOK.md` before creating a substantive artifact.
+  Treat `template.html` as an accessible technical foundation, not a visual theme
+  to copy unchanged. Check the result at the actual tweb pane size before rendering.
+
 ## Rendering
 1. Write a self-contained HTML file to `.tweb/<slug>.html`
    (inline CSS, dark theme, no external deps).
@@ -34,7 +52,8 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 4. Confirm `tweb-render` succeeds. Do not merely say an artifact was produced.
 5. Live updates: edit the HTML and run `tweb-render` again; it keeps the update in
    the current workspace.
-6. Use the template at `~/rtide/share/template.html` for consistent styling.
+6. Use `~/rtide/share/template.html` as a technical foundation and the design
+   playbook for art direction; adapt both to the subject instead of cloning a theme.
 
 ## Tools
 - `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb

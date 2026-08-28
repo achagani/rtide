@@ -29,7 +29,8 @@ you need to work in it. New workspaces start with keyboard focus in this prompt.
   to the chosen provider (env vars / CLI flags)
 - **tweb as the output surface** — the agent renders answers as self-contained HTML
   with the most useful visual form for the content (images, maps, charts, diagrams,
-  timelines, tables, cards, and contextual links); the terminal stays minimal
+  timelines, tables, and contextual links), with content-led art direction instead
+  of a repeated dashboard template; the terminal stays minimal
 - **Welcome screen** — each new workspace opens with a branded welcome page in tweb
   (workspace, provider/harness/model, keybindings)
 - **Agent as an input box** — the agent pane is a pure input line with a one-line
