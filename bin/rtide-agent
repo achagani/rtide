@@ -594,14 +594,27 @@ def input_panel(response, reply_endpoint):
 
 
 def start_reply_server():
-    """Receive tweb form replies and enter them into this agent prompt."""
+    """Receive tweb reply and export actions for this workspace."""
     pane = os.environ.get("TMUX_PANE", "")
     if not pane:
-        return "", None
+        return "", "", None
+    session = subprocess.run(
+        ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+        capture_output=True, text=True,
+    ).stdout.strip()
     token = secrets.token_urlsafe(18)
 
     class ReplyHandler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
+            if self.path == "/pdf/" + token and session:
+                subprocess.Popen(
+                    [os.path.join(SELF_DIR, "rtide"), "pdf", session],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                self.send_response(204)
+                self.end_headers()
+                return
             if self.path != "/reply/" + token:
                 self.send_error(404)
                 return
@@ -625,9 +638,10 @@ def start_reply_server():
     try:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ReplyHandler)
     except OSError:
-        return "", None
+        return "", "", None
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    return f"http://127.0.0.1:{server.server_port}/reply/{token}", server
+    base = f"http://127.0.0.1:{server.server_port}"
+    return base + "/reply/" + token, base + "/pdf/" + token, server
 
 
 def build_result_html(request, response, workspace, elapsed, reply_endpoint=""):
@@ -677,7 +691,7 @@ const allItems={items};const frame=document.getElementById('artifact');const dot
 </script></body></html>"""
 
 
-def build_viewer_html(entries):
+def build_viewer_html(entries, pdf_endpoint=""):
     items = [{"url": e.get("url", ""), "title": e.get("title", "Output"),
               "kind": "artifact" if e.get("kind") == "custom artifact" else "response"}
              for e in entries if e.get("url")]
@@ -685,6 +699,20 @@ def build_viewer_html(entries):
     page = VIEWER_PAGE.format(items=payload)
     page = page.replace('<a class="raw" id="raw" href="#">Open ↗</a>', "")
     page = page.replace("document.getElementById('raw').href=src;", "")
+    if pdf_endpoint:
+        pdf_form = (f'<form class="pdf-action" method="post" '
+                    f'action="{H.escape(pdf_endpoint, quote=True)}">'
+                    '<button id="pdf" type="submit" title="Export exact visual PDF">PDF</button>'
+                    '</form>')
+        page = page.replace(
+            '<button id="pdf" title="Export artifact through the system PDF dialog">PDF</button>',
+            pdf_form,
+        )
+        page = page.replace(
+            "document.getElementById('pdf').onclick=()=>{try{frame.contentWindow.print()}catch(e){}};",
+            "",
+        )
+        page = page.replace("</head>", "<style>.pdf-action{margin:0}</style></head>")
     print_css = ("<style>@media print{*{-webkit-print-color-adjust:exact!important;"
                  "print-color-adjust:exact!important}nav{display:none!important}"
                  "body{display:block!important;background:#090d14!important}"
@@ -775,7 +803,7 @@ def main():
     legacy_history_path = os.path.join(tweb_dir, "agent.html")
     session_file = os.path.join(wdir, ".rtide", "agent-session")
     history_data_path = os.path.join(wdir, ".rtide", "output-history.json")
-    reply_endpoint, reply_server = start_reply_server()
+    reply_endpoint, pdf_endpoint, reply_server = start_reply_server()
 
     # resume a previous session for this harness, if any
     session_id = None
@@ -807,7 +835,7 @@ def main():
             pass
     save_history(history_data_path, history)
     with open(viewer_path, "w") as f:
-        f.write(build_viewer_html(history))
+        f.write(build_viewer_html(history, pdf_endpoint))
     write_history_pages(tweb_dir, history, workspace)
 
     clear()
@@ -904,7 +932,7 @@ def main():
         save_history(history_data_path, history)
         write_history_pages(tweb_dir, history, workspace)
         with open(viewer_path, "w") as f:
-            f.write(build_viewer_html(history))
+            f.write(build_viewer_html(history, pdf_endpoint))
 
         loaded = show_and_verify(target, result_path)
         clear()

@@ -206,15 +206,16 @@ class AgentStatusTests(unittest.TestCase):
         viewer = AGENT.build_viewer_html([
             {"url": "file:///one.html", "title": "One"},
             {"url": "file:///two.html", "title": "Two"},
-        ])
+        ], "http://127.0.0.1:123/pdf/token")
         self.assertIn('<a class="outputs" href="history.html">Outputs</a>', viewer)
         self.assertIn('<iframe id="artifact"', viewer)
         self.assertNotIn("Open ↗", viewer)
+        self.assertIn('class="pdf-action"', viewer)
+        self.assertNotIn("contentWindow.print", viewer)
         self.assertIn("ArrowLeft", viewer)
         self.assertIn('className=\'dot\'', viewer)
         self.assertIn('file:///two.html', viewer)
         self.assertIn('data-mode="artifact"', viewer)
-        self.assertIn('contentWindow.print()', viewer)
 
 
 if __name__ == "__main__":

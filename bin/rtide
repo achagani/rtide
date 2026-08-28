@@ -693,7 +693,7 @@ cmd_history() {
 }
 
 cmd_pdf() {
-  local sess="${2:-}" requested="${3:-}" tweb nvim dir status current target name out capture_dir
+  local sess="${2:-}" requested="${3:-}" tweb nvim dir status current target name out capture_dir height last_height stable
   [[ -n "$sess" ]] || sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
   [[ -n "$sess" ]] && tmux has-session -t "$sess" 2>/dev/null \
     || { echo "pdf: no workspace session" >&2; exit 1; }
@@ -713,6 +713,24 @@ cmd_pdf() {
     out="$dir/exports/${name}-$(date +%Y%m%d-%H%M%S).pdf"
   fi
   tweb navigate --pane "$tweb" "$target" >/dev/null
+  # Wait for navigation, web fonts, and responsive layout to settle. Capturing
+  # on the first paint can produce a shorter page than the final artifact.
+  tweb wait --pane "$tweb" --load >/dev/null 2>&1 || true
+  tweb eval --pane "$tweb" 'document.fonts?.ready || true' >/dev/null 2>&1 || true
+  last_height=""; stable=0
+  for _ in 1 2 3 4 5 6 7 8; do
+    height=$(tweb eval --pane "$tweb" \
+      'Math.max(document.body.scrollHeight,document.documentElement.scrollHeight)' \
+      2>/dev/null || true)
+    if [[ "$height" =~ ^[0-9]+$ && "$height" == "$last_height" ]]; then
+      stable=$((stable + 1))
+      (( stable >= 2 )) && break
+    else
+      stable=0
+    fi
+    last_height="$height"
+    tweb wait --pane "$tweb" --ms 150 >/dev/null 2>&1 || true
+  done
   # Chromium print-to-PDF can drop backgrounds and clip tall local artifacts.
   # Capture the complete rendered document and wrap that exact visual in one
   # continuous PDF page instead. This preserves every color and every pixel.
@@ -803,8 +821,8 @@ bind_voice_click() {
   # control in the prompt pane's rightmost columns. Open on mouse-up so the
   # release belonging to the click cannot immediately dismiss the popup.
   tmux bind-key -n MouseDown1Pane "select-pane -t = ; send-keys -M"
-  tmux bind-key -n MouseUp1Pane if-shell -F \
-    '#{&&:#{==:#{@rtide-role},agent},#{>=:#{mouse_x},#{-:#{+:#{pane_left},#{pane_width}},12}}}' \
+  tmux bind-key -n MouseUp1Pane if-shell \
+    "test '#{@rtide-role}' = agent && test '#{mouse_x}' -ge \$((#{pane_left}+#{pane_width}-12))" \
     "run-shell -b 'rtide voice-popup #{pane_id} #{client_name}'" \
     'send-keys -M'
 }
