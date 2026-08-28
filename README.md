@@ -19,6 +19,10 @@ nvim + tweb panes get the rest. It shows a one-line status (`● idle` / `● wo
 `● done (12s)`) and a prompt — type a request, and the harness runs
 non-interactively, rendering its response to tweb. Zoom it with `prefix+a` when
 you need to work in it. New workspaces start with keyboard focus in this prompt.
+While a turn is running, plain text queues a follow-up and the status shows `qN`.
+Use `/steer <message>` to interrupt and resume the same session with new direction,
+`/interrupt` to stop, `/resend` to repeat the last message, and `/queue` to inspect
+the queue count (`/help` prints this reminder in the prompt).
 
 ## What you get
 

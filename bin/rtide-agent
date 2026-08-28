@@ -14,6 +14,7 @@ import json
 import os
 import re
 import selectors
+import signal
 import shutil
 import subprocess
 import sys
@@ -188,19 +189,21 @@ def activity(event=None):
     return raw, CYAN
 
 
-def working_status(tool=None, elapsed=0):
+def working_status(tool=None, elapsed=0, queued=0):
     detail, color = activity(tool)
     timer = f"{int(elapsed)}s"
     # ANSI sequences do not consume columns. Budget using only visible text,
     # and collapse tool arguments so a status can never wrap the 3-line pane.
-    prefix = f"● working {timer}"
+    queue = f" q{queued}" if queued else ""
+    prefix = f"● working {timer}{queue}"
     width = shutil.get_terminal_size((80, 24)).columns
     room = max(0, width - len(prefix) - (3 if detail else 0))
     detail = detail[:room].rstrip()
     suffix = f" {DIM}·{RESET} {color}{detail}{RESET}" if detail else ""
     # Timer ticks and activity events replace the same physical line.
     sys.stdout.write(
-        f"\r\033[2K{YELLOW}●{RESET} working {CYAN}{timer}{RESET}{suffix}"
+        f"\r\033[2K{YELLOW}●{RESET} working {CYAN}{timer}{RESET}"
+        f"{MAGENTA}{queue}{RESET}{suffix}"
     )
     sys.stdout.flush()
 
@@ -286,24 +289,88 @@ def parse_line(harness, line):
     return None, None, None
 
 
-def run_harness(cmd, harness, on_tool):
-    """Run the harness command, streaming events. Returns (text, session_id, rc)."""
+def classify_live_input(line, last_request=""):
+    """Classify input entered while a harness turn is active."""
+    value = line.strip()
+    if not value:
+        return "none", ""
+    if value == "/interrupt":
+        return "interrupt", ""
+    if value == "/queue":
+        return "inspect", ""
+    if value == "/resend":
+        return ("queue", last_request) if last_request else ("inspect", "")
+    if value.startswith("/steer ") and value[7:].strip():
+        return "steer", value[7:].strip()
+    return "queue", value
+
+
+def stop_process(proc):
+    """Stop a harness and its CLI children without killing the RTIDE wrapper."""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=1)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
+    """Run a harness while accepting queue, steer, and interrupt controls."""
     text_parts = []
     raw_parts = []
     session_id = None
     proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
-                            stdin=subprocess.DEVNULL)
+                            stdin=subprocess.DEVNULL, start_new_session=True)
     stream = selectors.DefaultSelector()
     stream.register(proc.stdout, selectors.EVENT_READ)
+    live_input = sys.stdin.isatty()
+    if live_input:
+        stream.register(sys.stdin, selectors.EVENT_READ)
     started = time.monotonic()
     current_activity = None
+    queued = []
+    steer = None
+    interrupted = False
+    output_open = True
     while True:
         events = stream.select(timeout=0.2)
-        if events:
+        for key, _ in events:
+            if live_input and key.fileobj is sys.stdin:
+                line = sys.stdin.readline()
+                if line == "":
+                    live_input = False
+                    stream.unregister(sys.stdin)
+                    continue
+                action, payload = classify_live_input(line, last_request)
+                if action == "queue" and payload:
+                    queued.append(payload)
+                    current_activity = f"@note queued follow-up ({queued_ahead + len(queued)})"
+                elif action == "steer":
+                    steer = payload
+                    current_activity = "@note steering current turn"
+                    stop_process(proc)
+                elif action == "interrupt":
+                    interrupted = True
+                    current_activity = "@note interrupting current turn"
+                    stop_process(proc)
+                elif action == "inspect":
+                    count = queued_ahead + len(queued)
+                    current_activity = f"@note queue contains {count} message{'s' if count != 1 else ''}"
+                continue
             line = proc.stdout.readline()
             if line == "":
-                break
+                output_open = False
+                try:
+                    stream.unregister(proc.stdout)
+                except KeyError:
+                    pass
+                continue
             line = line.strip()
             if not line:
                 continue
@@ -319,8 +386,9 @@ def run_harness(cmd, harness, on_tool):
                 session_id = sid
             if tool:
                 current_activity = tool
-        on_tool(current_activity, time.monotonic() - started)
-        if proc.poll() is not None and not events:
+        on_tool(current_activity, time.monotonic() - started,
+                queued_ahead + len(queued))
+        if proc.poll() is not None and not output_open:
             break
     stream.close()
     proc.wait()
@@ -329,7 +397,7 @@ def run_harness(cmd, harness, on_tool):
     if not text:
         # plain-text harness (hermes/opencode) or parse gap: use raw output
         text = "\n".join(raw_parts).strip()
-    return text, session_id, rc
+    return text, session_id, rc, queued, steer, interrupted
 
 
 def inline_md(text):
@@ -460,10 +528,17 @@ HISTORY_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><me
 </style></head><body><main><header><div><div class="eyebrow">RTIDE · output archive</div><h1>Output history</h1></div><div class="counts">{count} outputs · {artifact_count} artifacts</div></header><div class="list">{cards}</div></main></body></html>"""
 
 VIEWER_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RTIDE output viewer</title><style>
-:root{{color-scheme:dark}}*{{box-sizing:border-box}}html,body{{height:100%;margin:0;overflow:hidden;background:#080c12}}body{{display:grid;grid-template-rows:42px minmax(0,1fr);font:12px/1 system-ui,sans-serif}}nav{{display:flex;align-items:center;gap:5px;padding:5px 9px;border-bottom:1px solid #273448;background:#0d141eee;color:#dbe7f7}}button,a{{height:30px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;padding:0 10px;background:transparent;color:inherit;text-decoration:none;font:650 12px/1 system-ui,sans-serif;cursor:pointer}}button:hover,a:hover{{background:#ffffff0d;border-color:#ffffff18}}.outputs{{color:#5eead4}}.spacer{{flex:1}}.raw{{color:#91a4ba}}iframe{{display:block;width:100%;height:100%;border:0;background:#090d14}}
-</style></head><body><nav aria-label="RTIDE output navigation"><button id="back" aria-label="Back">←</button><a class="outputs" href="history.html">Outputs</a><button id="forward" aria-label="Forward">→</button><span class="spacer"></span><a class="raw" id="raw" href="#">Open artifact directly ↗</a></nav><iframe id="artifact" title="RTIDE output"></iframe><script>
-const src=new URLSearchParams(location.search).get('src')||'history.html';const frame=document.getElementById('artifact');frame.src=src;document.getElementById('raw').href=src;document.getElementById('back').onclick=()=>history.back();document.getElementById('forward').onclick=()=>history.forward();frame.addEventListener('load',()=>{{try{{document.title=(frame.contentDocument.title||'Output')+' — RTIDE'}}catch(e){{}}}});
+:root{{color-scheme:dark}}*{{box-sizing:border-box}}html,body{{height:100%;margin:0;overflow:hidden;background:#080c12}}body{{display:grid;grid-template-rows:42px minmax(0,1fr);font:12px/1 system-ui,sans-serif}}nav{{display:flex;align-items:center;gap:5px;padding:5px 9px;border-bottom:1px solid #273448;background:#0d141eee;color:#dbe7f7}}button,a{{height:30px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;padding:0 10px;background:transparent;color:inherit;text-decoration:none;font:650 12px/1 system-ui,sans-serif;cursor:pointer}}button:hover,a:hover{{background:#ffffff0d;border-color:#ffffff18}}button:disabled{{opacity:.3;cursor:default}}.outputs{{color:#5eead4}}.dots{{display:flex;align-items:center;gap:5px;max-width:min(34vw,320px);padding:0 7px;overflow:auto;scrollbar-width:none}}.dot{{width:7px;height:7px;min-width:7px;padding:0;border:0;border-radius:50%;background:#536176}}.dot.active{{background:#5eead4;box-shadow:0 0 0 3px #5eead426}}.counter{{color:#7f91a7;font-variant-numeric:tabular-nums;white-space:nowrap}}.spacer{{flex:1}}.raw{{color:#91a4ba}}iframe{{display:block;width:100%;height:100%;border:0;background:#090d14}}@media(max-width:620px){{.raw{{display:none}}.dots{{max-width:28vw}}}}
+</style></head><body><nav aria-label="RTIDE output navigation"><button id="prev" aria-label="Previous output" title="Previous output · Left arrow">←</button><a class="outputs" href="history.html">Outputs</a><button id="next" aria-label="Next output" title="Next output · Right arrow">→</button><div class="dots" id="dots" aria-label="Output position"></div><span class="counter" id="counter"></span><span class="spacer"></span><a class="raw" id="raw" href="#">Open directly ↗</a></nav><iframe id="artifact" title="RTIDE output"></iframe><script>
+const items={items};const frame=document.getElementById('artifact');const dots=document.getElementById('dots');let src=new URLSearchParams(location.search).get('src');let index=Math.max(0,items.findIndex(x=>x.url===src));if(!src&&items.length)index=items.length-1;items.forEach((item,i)=>{{const b=document.createElement('button');b.className='dot';b.title=item.title;b.setAttribute('aria-label','Open output '+(i+1));b.onclick=()=>go(i);dots.appendChild(b)}});function go(i){{if(!items.length)return;index=Math.max(0,Math.min(items.length-1,i));src=items[index].url;frame.src=src;document.getElementById('raw').href=src;document.getElementById('prev').disabled=index===0;document.getElementById('next').disabled=index===items.length-1;document.getElementById('counter').textContent=(index+1)+'/'+items.length;dots.querySelectorAll('.dot').forEach((d,n)=>d.classList.toggle('active',n===index));dots.children[index]?.scrollIntoView({{block:'nearest',inline:'center'}});const u=new URL(location.href);u.searchParams.set('src',src);history.replaceState(null,'',u)}}function keys(e){{if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey)return;if(e.key==='ArrowLeft'){{e.preventDefault();go(index-1)}}else if(e.key==='ArrowRight'){{e.preventDefault();go(index+1)}}}}document.getElementById('prev').onclick=()=>go(index-1);document.getElementById('next').onclick=()=>go(index+1);addEventListener('keydown',keys);frame.addEventListener('load',()=>{{try{{document.title=(frame.contentDocument.title||items[index]?.title||'Output')+' — RTIDE';frame.contentWindow.addEventListener('keydown',keys)}}catch(e){{}}}});go(index);
 </script></body></html>"""
+
+
+def build_viewer_html(entries):
+    items = [{"url": e.get("url", ""), "title": e.get("title", "Output")}
+             for e in entries if e.get("url")]
+    payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
+    return VIEWER_PAGE.format(items=payload)
 
 
 def load_history(path):
@@ -533,8 +608,6 @@ def main():
     legacy_history_path = os.path.join(tweb_dir, "agent.html")
     session_file = os.path.join(wdir, ".rtide", "agent-session")
     history_data_path = os.path.join(wdir, ".rtide", "output-history.json")
-    with open(viewer_path, "w") as f:
-        f.write(VIEWER_PAGE.format())
 
     # resume a previous session for this harness, if any
     session_id = None
@@ -565,6 +638,8 @@ def main():
         except OSError:
             pass
     save_history(history_data_path, history)
+    with open(viewer_path, "w") as f:
+        f.write(build_viewer_html(history))
     initial_history = build_history_html(history, workspace)
     for path in (history_path, legacy_history_path):
         with open(path, "w") as f:
@@ -572,27 +647,53 @@ def main():
 
     clear()
     status(f"rtide-agent: {harness} + {provider} ({model})")
-    idle_status()
+    status(f"{GREEN}●{RESET} idle · /help for queue and steering controls")
 
+    pending = []
+    last_request = ""
     while True:
-        try:
-            req = input("> ")
-        except (EOFError, KeyboardInterrupt):
-            clear()
-            status("bye")
-            break
+        if pending:
+            req = pending.pop(0)
+        else:
+            try:
+                req = input("> ")
+            except (EOFError, KeyboardInterrupt):
+                clear()
+                status("bye")
+                break
         req = req.strip()
         if not req:
             continue
+        if req == "/help":
+            status("plain text queues while working · /steer TEXT · /interrupt · /resend · /queue")
+            continue
+        if req == "/queue":
+            status(f"queue: {len(pending)}")
+            continue
+        if req == "/interrupt":
+            status("interrupt: no active turn")
+            continue
+        if req == "/resend":
+            if not last_request:
+                status("resend: no previous message")
+                continue
+            req = last_request
+        elif req.startswith("/steer "):
+            req = req[7:].strip()
+            if not req:
+                continue
 
         clear()
-        working_status(elapsed=0)
+        working_status(elapsed=0, queued=len(pending))
         t0 = time.time()
         marker = render_marker_path()
         render_before = marker_version(marker)
+        last_request = req
         try:
             cmd = get_run_cmd(harness, provider, model, req, session_id)
-            text, sid, rc = run_harness(cmd, harness, working_status)
+            text, sid, rc, newly_queued, steer, interrupted = run_harness(
+                cmd, harness, working_status, last_request, len(pending)
+            )
         except Exception as e:
             clear()
             error_status(str(e))
@@ -601,6 +702,16 @@ def main():
             session_id = sid
             with open(session_file, "w") as f:
                 f.write(f"{harness}:{sid}")
+        pending.extend(newly_queued)
+        if steer:
+            pending.insert(0, steer)
+        if steer or interrupted:
+            clear()
+            if steer:
+                status(f"{MAGENTA}●{RESET} steering · q{len(pending)}")
+            else:
+                status(f"{YELLOW}●{RESET} interrupted · q{len(pending)}")
+            continue
         dt = time.time() - t0
 
         response = text or f"(no output — exit {rc})"
@@ -630,6 +741,8 @@ def main():
         for path in (history_path, legacy_history_path):
             with open(path, "w") as f:
                 f.write(history_html)
+        with open(viewer_path, "w") as f:
+            f.write(build_viewer_html(history))
 
         loaded = show_and_verify(target, result_path)
         clear()

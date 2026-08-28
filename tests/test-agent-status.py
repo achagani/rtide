@@ -48,6 +48,24 @@ class AgentStatusTests(unittest.TestCase):
         self.assertNotIn("\n", plain)
         self.assertLessEqual(len(plain), size.columns)
 
+    def test_working_status_shows_queue_count(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            AGENT.working_status("@note researching", 9, 3)
+        plain = ANSI.sub("", out.getvalue())
+        self.assertIn("working 9s", plain)
+        self.assertIn("q3", plain)
+
+    def test_live_input_controls(self):
+        self.assertEqual(AGENT.classify_live_input("follow up"),
+                         ("queue", "follow up"))
+        self.assertEqual(AGENT.classify_live_input("/steer focus on maps"),
+                         ("steer", "focus on maps"))
+        self.assertEqual(AGENT.classify_live_input("/interrupt"),
+                         ("interrupt", ""))
+        self.assertEqual(AGENT.classify_live_input("/resend", "last request"),
+                         ("queue", "last request"))
+
     def test_codex_command_event_uses_agent_payload(self):
         event = {
             "type": "item.started",
@@ -143,9 +161,15 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn("Big Meadows — Field Guide", page)
 
     def test_viewer_keeps_navigation_outside_artifact(self):
-        self.assertIn('<a class="outputs" href="history.html">Outputs</a>',
-                      AGENT.VIEWER_PAGE)
-        self.assertIn('<iframe id="artifact"', AGENT.VIEWER_PAGE)
+        viewer = AGENT.build_viewer_html([
+            {"url": "file:///one.html", "title": "One"},
+            {"url": "file:///two.html", "title": "Two"},
+        ])
+        self.assertIn('<a class="outputs" href="history.html">Outputs</a>', viewer)
+        self.assertIn('<iframe id="artifact"', viewer)
+        self.assertIn("ArrowLeft", viewer)
+        self.assertIn('className=\'dot\'', viewer)
+        self.assertIn('file:///two.html', viewer)
 
 
 if __name__ == "__main__":
