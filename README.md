@@ -129,7 +129,7 @@ rtide layout-reset [session] → restore nvim 40%, tweb 60%, and the three-line 
 rtide nvim [toggle|hide|show] [session] → collapse or restore the editor pane
 rtide menu       → open the quick-switcher menu for a session (prefix+A)
 rtide history    → open the current workspace's browsable output history
-rtide pdf [session] [path] → export the complete artifact as an exact-color continuous-page PDF
+rtide pdf [session] [path] → export the complete artifact as an exact-color continuous-page PDF, then reveal it in its folder
 rtide auth       → check auth for the configured provider
 rtide matrix     → print the provider×harness compatibility matrix
 rtide setup      → re-run the wizard
