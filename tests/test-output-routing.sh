@@ -36,6 +36,18 @@ assert_log 'navigate --pane %9'
 assert_log 'rtide-output-nav'
 assert_no_log 'open '
 
+# A harness-provided pane hint survives command sandboxes that strip both tmux
+# variables and change cwd outside the workspace.
+reset_log
+(
+  cd "$TEST_TMP"
+  env -u TMUX -u TMUX_PANE RTIDE_TWEB_PANE=%9 RTIDE_TWEB_SESSION_HINT=rtide-alpha \
+    FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%9 tweb\n' \
+    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html"
+) || fail 'direct pane hint render failed'
+assert_log 'navigate --pane %9'
+assert_no_log 'open '
+
 # Direct tweb split/open attempts from an agent are routed to the registered
 # workspace browser instead of creating a duplicate pane.
 mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/workspace/subdir"

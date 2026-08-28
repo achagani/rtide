@@ -6,11 +6,17 @@
 rtide_tweb_prepare() {
   [[ -n "${RTIDE_TWEB_MODE:-}" ]] && return 0
 
+  # Capture direct harness hints before resetting the exported result fields.
+  # Some command sandboxes lose TMUX_PANE and change cwd, so neither of the
+  # older inference paths is guaranteed to survive a tool invocation.
+  local pane_hint="${RTIDE_TWEB_PANE:-}"
+  local session_hint="${RTIDE_TWEB_SESSION_HINT:-}"
+
   RTIDE_TWEB_MODE=standalone
   RTIDE_TWEB_PANE=
   RTIDE_TWEB_SESSION=standalone
 
-  local anchor_pane="${TMUX_PANE:-}"
+  local anchor_pane="${pane_hint:-${TMUX_PANE:-}}"
   if [[ -z "$anchor_pane" ]]; then
     # Agent harnesses may intentionally strip TMUX/TMUX_PANE from commands.
     # Recover the workspace's registered browser pane from the command cwd.
@@ -31,6 +37,7 @@ rtide_tweb_prepare() {
     local session pane role
     local -a matches=()
     session=$(tmux display-message -p -t "$anchor_pane" '#{session_name}' 2>/dev/null || true)
+    [[ -n "$session" ]] || session="$session_hint"
     if [[ -n "$session" ]]; then
       RTIDE_TWEB_SESSION="$session"
       while read -r pane role; do

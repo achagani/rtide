@@ -349,6 +349,15 @@ def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
     if real_tweb and os.path.isdir(guard_dir):
         child_env["RTIDE_REAL_TWEB"] = real_tweb
         child_env["RTIDE_WORKSPACE"] = os.getcwd()
+        tweb_pane = managed_tweb_pane()
+        if tweb_pane:
+            child_env["RTIDE_TWEB_PANE"] = tweb_pane
+            session = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", tweb_pane,
+                 "#{session_name}"], capture_output=True, text=True,
+            ).stdout.strip()
+            if session:
+                child_env["RTIDE_TWEB_SESSION_HINT"] = session
         child_env["PATH"] = guard_dir + os.pathsep + child_env.get("PATH", "")
     proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,

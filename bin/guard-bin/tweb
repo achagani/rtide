@@ -15,8 +15,8 @@ while [[ "$root" != / ]]; do
   root=${root%/*}; [[ -n "$root" ]] || root=/
 done
 
-pane=""
-[[ -n "$registration" ]] && read -r pane < "$registration" || true
+pane="${RTIDE_TWEB_PANE:-}"
+[[ -z "$pane" && -n "$registration" ]] && read -r pane < "$registration" || true
 role=""
 [[ -n "$pane" ]] && role=$(tmux display-message -p -t "$pane" '#{@rtide-role}' 2>/dev/null || true)
 
