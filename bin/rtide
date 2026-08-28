@@ -198,6 +198,20 @@ cmd_new() {
   exec "$0" "$ndir"
 }
 
+# Resume a workspace on its editor pane. tmux remembers the last active pane
+# per session, which is often the agent input strip; selecting the workspace
+# should consistently return the user to the main editing surface instead.
+resume_session() {
+  local sess="$1" pane
+  pane=$(tmux list-panes -t "$sess" -F '#{pane_id}' -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
+  [[ -n "$pane" ]] && tmux select-pane -t "$pane" 2>/dev/null || true
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "$sess"
+  else
+    tmux attach-session -t "$sess"
+  fi
+}
+
 # Pick a workspace to resume (or start a new one). Used by bare `rtide` and
 # `rtide switch`. Sessions are listed with their directory (`#{session_path}` —
 # every workspace is created with `-c "$DIR"`); the one matching the current
@@ -260,9 +274,8 @@ cmd_pick() {
       else
         sess=$(printf '%s' "$sel" | cut -f1)
         if tmux has-session -t "$sess" 2>/dev/null; then
-          tmux switch-client -t "$sess" 2>/dev/null \
-            || tmux attach -t "$sess" 2>/dev/null \
-            || echo "switch to $sess — attach with: tmux attach -t $sess"
+          resume_session "$sess" \
+            || echo "could not open $sess — attach with: tmux attach -t $sess" >&2
           exit 0
         fi
       fi
@@ -292,9 +305,8 @@ cmd_pick() {
     fi
     if [[ -n "$sel" ]]; then
       sess=$(printf '%s' "$sel" | cut -f1)
-      tmux switch-client -t "$sess" 2>/dev/null \
-        || tmux attach -t "$sess" 2>/dev/null \
-        || echo "switch to $sess — attach with: tmux attach -t $sess"
+      resume_session "$sess" \
+        || echo "could not open $sess — attach with: tmux attach -t $sess" >&2
     else
       printf "no workspace matches '%s' — type 'new' to create one\n" "$ans" >&2
       exit 1
