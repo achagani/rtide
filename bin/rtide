@@ -12,6 +12,7 @@
 #   rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 #   rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
 #   rtide menu       → quick-switcher menu (prefix+A)
+#   rtide history    → open the current workspace's output history
 #   rtide auth       → check auth for the configured provider
 #   rtide matrix     → print the provider×harness compatibility matrix
 #   rtide setup      → re-run the wizard
@@ -204,6 +205,10 @@ install_session_hooks() {
   # Terminal maximize/restore changes the tmux window size proportionally.
   # Reapply RTIDE's exact strip height and column split after each client resize.
   tmux set-hook -t "$sess" client-resized \
+    "run-shell 'rtide refresh $quoted >/dev/null 2>&1'" 2>/dev/null || true
+  # after-resize-window is the authoritative geometry event on tmux 3.6 and
+  # also covers programmatic/terminal-driven window changes.
+  tmux set-hook -t "$sess" after-resize-window \
     "run-shell 'rtide refresh $quoted >/dev/null 2>&1'" 2>/dev/null || true
 }
 
@@ -582,11 +587,27 @@ cmd_menu() {
     "Zoom tweb"        t "run-shell 'rtide zoom tweb'" \
     "Zoom agent"       a "run-shell 'rtide zoom agent'" \
     "Config…"          c "display-popup -E -w 70% -h 50% 'sh -c \"rtide config; echo; read -p done\"'" \
+    "Output history"   h "run-shell 'rtide history ${sess}'" \
     "Sweep memories"   s "run-shell 'rtide sweep'" \
     "" \
     "Detach"           d "detach-client" \
     "Quit workspace"   q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit ${sess}'\""
   exit 0
+}
+
+cmd_history() {
+  local sess="${2:-$(tmux display-message -p '#{session_name}' 2>/dev/null || true)}"
+  local nvim tweb dir page
+  [[ -n "$sess" ]] && tmux has-session -t "$sess" 2>/dev/null \
+    || { echo "history: no workspace session" >&2; exit 1; }
+  nvim=$(tmux list-panes -s -t "$sess" -F '#{pane_id} #{@rtide-role}' | awk '$2=="nvim"{print $1; exit}')
+  tweb=$(tmux list-panes -s -t "$sess" -F '#{pane_id} #{@rtide-role}' | awk '$2=="tweb"{print $1; exit}')
+  [[ -n "$nvim" && -n "$tweb" ]] || { echo "history: incomplete RTIDE layout in $sess" >&2; exit 1; }
+  dir=$(tmux display-message -p -t "$nvim" '#{pane_current_path}')
+  page="$dir/.tweb/history.html"
+  [[ -f "$page" ]] || { echo "history: no completed outputs yet" >&2; exit 1; }
+  tweb navigate --pane "$tweb" "file://$(realpath "$page")"
+  tweb eval --pane "$tweb" "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; true" >/dev/null 2>&1 || true
 }
 
 # Bind a key in the prefix table only if it's not already bound (don't clobber)
@@ -613,6 +634,7 @@ case "${1:-}" in
   config) cmd_config "$@" ;;
   refresh) cmd_refresh "$@" ;;
   menu)   cmd_menu "$@" ;;
+  history) cmd_history "$@" ;;
   matrix) "$PROVIDER_BIN" matrix; exit 0 ;;
 esac
 

@@ -6,9 +6,13 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 ## Output model
 - Your terminal is the INPUT surface. Print only a one-line status
   (e.g. "working…", "rendered to .tweb/foo.html"). Keep terminal output minimal.
-- Short answers (a sentence or two) → answer inline.
-- Substantive output (research, comparisons, explanations, status, diffs)
-  → render as HTML in tweb.
+- Every completed request must leave tweb showing a visually designed,
+  self-contained result page. Do not use a chat transcript as the primary output.
+- Treat each request as its own artifact: strong hierarchy, digestible sections,
+  purposeful cards/tables where useful, responsive spacing, and polished typography.
+- The RTIDE wrapper supplies a designed standalone fallback for plain responses and
+  keeps a separate output-history index. For research, comparisons, plans, reports,
+  and other substantive work, create a purpose-built HTML artifact yourself.
 
 ## Rendering
 1. Write a self-contained HTML file to `.tweb/<slug>.html`
@@ -16,9 +20,10 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 2. Render: `tweb-render .tweb/<slug>.html`
    — this resolves the tweb pane belonging to the current RTIDE workspace.
 3. Dense content: `tweb-render --float .tweb/<slug>.html`.
-4. Live updates: edit the HTML and run `tweb-render` again; it keeps the update in
+4. Confirm `tweb-render` succeeds. Do not merely say an artifact was produced.
+5. Live updates: edit the HTML and run `tweb-render` again; it keeps the update in
    the current workspace.
-5. Use the template at `~/rtide/share/template.html` for consistent styling.
+6. Use the template at `~/rtide/share/template.html` for consistent styling.
 
 ## Tools
 - `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb

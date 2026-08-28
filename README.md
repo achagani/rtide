@@ -33,8 +33,8 @@ you need to work in it. New workspaces start with keyboard focus in this prompt.
   (workspace, provider/harness/model, keybindings)
 - **Agent as an input box** — the agent pane is a pure input line with a one-line
   status; the harness runs non-interactively per request (`claude -p` / `codex exec` /
-  `hermes chat -q` / `opencode run`) and the conversation renders in tweb,
-  auto-scrolling to the newest message
+  `hermes chat -q` / `opencode run`). Every turn opens as its own designed tweb
+  result; a separate visual history index links all prior results and custom artifacts
 - **Files in the editor** — files the agent creates or edits open in the nvim pane
   via `rtide-open <path>` (a convention the agent follows)
 - **Agent-independent memory** — one store every agent reads and writes through the
@@ -113,6 +113,7 @@ rtide agent      → re-pick provider/harness/model for the current workspace
 rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
 rtide menu       → open the quick-switcher menu for a session (prefix+A)
+rtide history    → open the current workspace's browsable output history
 rtide auth       → check auth for the configured provider
 rtide matrix     → print the provider×harness compatibility matrix
 rtide setup      → re-run the wizard
@@ -123,11 +124,11 @@ rtide --no-ask   → skip the provider/harness prompt (use stored config)
 **In-workspace keybindings** (tmux prefix, default `Ctrl-b`):
 
 ```
-prefix+t → zoom tweb      (chat mode)
+prefix+t → zoom tweb      (result view)
 prefix+a → zoom agent
 prefix+r → switch workspace
 prefix+R → refresh workspace layout (apply global config to panes)
-prefix+A → quick-switcher menu (switch / change agent / new / refresh / zoom / config / sweep / quit)
+prefix+A → actions menu (switch / agent / new / refresh / zoom / config / output history / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)
 ```

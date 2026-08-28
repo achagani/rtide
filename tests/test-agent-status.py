@@ -66,6 +66,29 @@ class AgentStatusTests(unittest.TestCase):
                 f.write("file:///workspace/.tweb/research.html\n")
             self.assertTrue(AGENT.artifact_rendered(marker, before))
 
+    def test_fallback_is_a_standalone_designed_result(self):
+        page = AGENT.build_result_html(
+            "Compare the options", "# Recommendation\n\n- Fast\n- Clear", "demo", 4.2
+        )
+        self.assertIn("RTIDE · designed result", page)
+        self.assertIn("Browse output history", page)
+        self.assertIn("<h1>Recommendation</h1>", page)
+        self.assertIn("<ul>", page)
+        self.assertNotIn('class="msg', page)
+        self.assertNotIn("scrollTo", page)
+
+    def test_history_links_to_individual_results(self):
+        entries = [{
+            "request": "Compare the options", "title": "Recommendation",
+            "url": "file:///workspace/.tweb/results/result-1.html",
+            "elapsed": 4.2, "created": "Aug 27, 2026 · 22:30",
+            "kind": "designed result",
+        }]
+        page = AGENT.build_history_html(entries, "demo")
+        self.assertIn("Result history", page)
+        self.assertIn("result-1.html", page)
+        self.assertIn("Compare the options", page)
+
 
 if __name__ == "__main__":
     unittest.main()
