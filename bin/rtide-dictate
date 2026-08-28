@@ -37,7 +37,10 @@ if role.stdout.strip() != "agent":
 if importlib.util.find_spec("faster_whisper") is None:
     env_dir = os.path.expanduser("~/.rtide/speech-env")
     env_python = os.path.join(env_dir, "bin", "python")
-    if os.path.realpath(sys.executable) != os.path.realpath(env_python):
+    # A venv's interpreter is normally a symlink to the system Python, so
+    # realpath() makes both executables look identical. Compare their invoked
+    # paths instead or the bootstrap falsely assumes it is already in the venv.
+    if os.path.abspath(sys.executable) != os.path.abspath(env_python):
         print("◌ preparing the local speech engine (first use only)…")
         if not os.path.exists(env_python):
             subprocess.run([sys.executable, "-m", "venv", env_dir], check=True)

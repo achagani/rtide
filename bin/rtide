@@ -668,7 +668,7 @@ cmd_menu() {
     "Config…"          c "display-popup -E -w 70% -h 50% 'sh -c \"rtide config; echo; read -p done\"'" \
     "Output history"   h "run-shell 'rtide history ${sess}'" \
     "Export output PDF" p "display-popup -E -w 72% -h 20% 'sh -c \"rtide pdf ${sess}; echo; read -p done\"'" \
-    "Dictate prompt…"  v "display-popup -E -w 64% -h 25% 'rtide-dictate #{pane_id}'" \
+    "Dictate prompt…"  v "display-popup -E -w 64% -h 25% 'sh -c \"rtide-dictate #{pane_id}; rc=\\$?; [ \\$rc -eq 0 ] || read -p \\\"press Enter to close\\\"; exit \\$rc\"'" \
     "Sweep memories"   s "run-shell 'rtide sweep'" \
     "" \
     "Detach"           d "detach-client" \
@@ -771,7 +771,7 @@ bind_slash_menu() {
 
 bind_dictation() {
   tmux bind-key v display-popup -E -w 64% -h 25% \
-    "rtide-dictate '#{pane_id}'"
+    "sh -c 'rtide-dictate \"#{pane_id}\"; rc=\$?; [ \$rc -eq 0 ] || read -p \"press Enter to close\"; exit \$rc'"
 }
 
 case "${1:-}" in
