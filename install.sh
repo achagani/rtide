@@ -53,7 +53,7 @@ fi
 
 # 3. Symlink helpers into ~/.local/bin
 mkdir -p "$BIN_DIR"
-for b in rtide rtide-provider rtide-mcp rtide-mem tweb-render tweb-run; do
+for b in rtide rtide-provider rtide-mcp rtide-mem rtide-agent rtide-open tweb-render tweb-run; do
   ln -sf "$REPO_DIR/bin/$b" "$BIN_DIR/$b"
   echo "   linked $b"
 done

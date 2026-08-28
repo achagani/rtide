@@ -4,6 +4,8 @@
 #   rtide-provider compat-h <harness>                  → providers compatible with harness
 #   rtide-provider env <harness> <provider> <model>    → export/unset lines for the combo
 #   rtide-provider launch <harness> <provider> <model> → full command for the agent pane
+#   rtide-provider run <harness> <provider> <model> <prompt> [session]
+#                                                     → non-interactive one-shot command
 #   rtide-provider check <provider>                    → auth/health check (exit 0 = OK)
 #   rtide-provider models <provider>                    → available models
 #   rtide-provider matrix                              → compatibility matrix
@@ -34,12 +36,15 @@ compat_h() { # $1=harness → providers
   esac
 }
 
-# Env lines to point a harness at a provider. claude+anthropic must unset the
-# ollama vars so a global ANTHROPIC_BASE_URL doesn't leak into Anthropic.
+# Env lines to point a harness at a provider. claude+anthropic clears the
+# ollama vars only when they actually point at ollama — a real Anthropic
+# proxy/gateway (ANTHROPIC_BASE_URL + API key) must be left alone.
 env_for() { # $1=harness $2=provider $3=model
   case "$1:$2" in
     claude:anthropic)
-      echo "unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL"
+      if [[ "${ANTHROPIC_BASE_URL:-}" == *"11434"* ]]; then
+        echo "unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL"
+      fi
       ;;
     claude:ollama)
       echo "export ANTHROPIC_BASE_URL=$OLLAMA_URL"
@@ -82,6 +87,52 @@ launch() { # $1=harness $2=provider $3=model
     hermes:*)     cmd="hermes --provider $(hermes_provider "$2") -m $3" ;;
     opencode:*)   cmd="opencode --model $2/$3" ;;
     *)            echo "unsupported combo: $1 + $2" >&2; return 1 ;;
+  esac
+  if [[ -n "$envs" ]]; then
+    echo "$envs; $cmd"
+  else
+    echo "$cmd"
+  fi
+}
+
+# Non-interactive one-shot command for the rtide-agent wrapper.
+# $1=harness $2=provider $3=model $4=prompt $5=session (optional)
+# Emits a single shell command (env setup + harness invocation) that the
+# wrapper runs via `bash -c`. Auto-accepts file edits (claude acceptEdits /
+# codex workspace-write sandbox) since there's no interactive prompt.
+run() {
+  local harness="$1" provider="$2" model="$3" prompt="$4" session="${5:-}"
+  local q envs cmd
+  q=$(printf '%q' "$prompt")
+  envs=$(env_for "$harness" "$provider" "$model")
+  case "$harness:$provider" in
+    claude:*)
+      cmd="claude -p $q --model $model --output-format stream-json --verbose --permission-mode acceptEdits${session:+ --resume $session}"
+      ;;
+    codex:openai)
+      if [[ -n "$session" ]]; then
+        cmd="codex exec resume $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
+      else
+        cmd="codex exec $q --model $model --json --sandbox workspace-write --skip-git-repo-check -c model_reasoning_effort=none"
+      fi
+      ;;
+    codex:ollama)
+      if [[ -n "$session" ]]; then
+        cmd="codex exec resume $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
+      else
+        cmd="codex exec $q --oss --local-provider ollama --model $model --json --sandbox workspace-write --skip-git-repo-check -c model_reasoning_effort=none"
+      fi
+      ;;
+    hermes:*)
+      cmd="hermes chat -q $q -m $model --provider $(hermes_provider "$provider")${session:+ --resume $session}"
+      ;;
+    opencode:*)
+      cmd="opencode run $q --model $provider/$model${session:+ --session $session}"
+      ;;
+    *)
+      echo "unsupported combo: $harness + $provider" >&2
+      return 1
+      ;;
   esac
   if [[ -n "$envs" ]]; then
     echo "$envs; $cmd"
@@ -168,8 +219,9 @@ case "${1:-}" in
   compat-h) shift; compat_h "$@" ;;
   env)      shift; env_for "$@" ;;
   launch)   shift; launch "$@" ;;
+  run)      shift; run "$@" ;;
   check)    shift; check "$@" ;;
   models)   shift; models "$@" ;;
   matrix)   matrix ;;
-  *) echo "usage: rtide-provider compat|compat-h|env|launch|check|models|matrix"; exit 1 ;;
+  *) echo "usage: rtide-provider compat|compat-h|env|launch|run|check|models|matrix"; exit 1 ;;
 esac

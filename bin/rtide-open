@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# rtide-open — open a file in the workspace's nvim pane.
+#   rtide-open <file>   open <file> in the nvim pane (via its --listen socket)
+#
+# The agent calls this after creating/editing a file (see AGENTS.md). The
+# workspace root is found by walking up from cwd to the nearest .rtide/ dir,
+# so it works from any subdirectory. Fails with a one-line message if nvim
+# isn't running (no socket).
+set -euo pipefail
+
+FILE="${1:?usage: rtide-open <file>}"
+
+# find the workspace root: nearest ancestor containing .rtide/
+dir=$(pwd)
+while [[ "$dir" != "/" ]]; do
+  [[ -d "$dir/.rtide" ]] && break
+  dir=$(dirname "$dir")
+done
+[[ -d "$dir/.rtide" ]] || { echo "rtide-open: no .rtide/ workspace found from $(pwd)" >&2; exit 1; }
+
+SOCK="$dir/.rtide/nvim.sock"
+[[ -S "$SOCK" ]] || { echo "rtide-open: nvim not running (no socket at $SOCK)" >&2; exit 1; }
+
+# resolve relative paths against the workspace root so the agent can pass
+# either "src/app.py" or an absolute path
+case "$FILE" in
+  /*) ABS="$FILE" ;;
+  *)  ABS="$dir/$FILE" ;;
+esac
+
+if nvim --server "$SOCK" --remote "$ABS" 2>/dev/null; then
+  echo "opened: $ABS"
+else
+  echo "rtide-open: failed to open $ABS in nvim" >&2
+  exit 1
+fi

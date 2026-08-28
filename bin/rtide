@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # rtide — Rich Terminal IDE workspace launcher.
-#   rtide            → launch/attach the default workspace
+#   rtide            → pick an active workspace to resume, or start a new one
 #   rtide <dir>      → launch/attach the workspace for <dir>
 #   rtide new        → guided new workspace
-#   rtide switch     → picker over all rtide-* sessions
+#   rtide switch     → same picker as bare rtide (resume / new)
 #   rtide ls         → list workspaces
 #   rtide sweep      → capture pending MEM: memories from every live session
 #   rtide quit [dir] → sweep that session's memories, then kill it (from inside or out)
 #   rtide kill [dir] → alias for quit
 #   rtide agent      → re-pick provider/harness/model for the current workspace
+#   rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
+#   rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
+#   rtide menu       → quick-switcher menu (prefix+M)
 #   rtide auth       → check auth for the configured provider
 #   rtide matrix     → print the provider×harness compatibility matrix
 #   rtide setup      → re-run the wizard
@@ -127,8 +130,8 @@ setup_wizard() {
   echo "Installed agents: $installed"
   prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}"
   read -rp "Default directory (empty = current dir): " default_dir
-  read -rp "Agent strip % of window [30]: " agent_pct
-  agent_pct="${agent_pct:-30}"
+  read -rp "Agent strip lines [3]: " agent_lines
+  agent_lines="${agent_lines:-3}"
   read -rp "nvim width % [50]: " nvim_pct
   nvim_pct="${nvim_pct:-50}"
   local shells=()
@@ -150,7 +153,7 @@ provider=$PROVIDER
 harness=$HARNESS
 model=$MODEL
 default_dir=$default_dir
-agent_pct=$agent_pct
+agent_lines=$agent_lines
 nvim_pct=$nvim_pct
 shell=$shell
 auto_float=$auto_float
@@ -163,6 +166,9 @@ cmd_doctor() {
   for c in tweb tmux nvim; do
     command -v "$c" >/dev/null 2>&1 || { echo "MISSING: $c"; ok=0; }
   done
+  if command -v tweb >/dev/null 2>&1; then
+    tweb doctor || ok=0
+  fi
   command -v kitty >/dev/null 2>&1 || command -v ghostty >/dev/null 2>&1 \
     || { echo "MISSING: kitty or ghostty (terminal)"; ok=0; }
   tmux -V 2>/dev/null | grep -qE '3\.[3-9]' || echo "WARN: tmux < 3.3 (tweb requires 3.3+)"
@@ -192,24 +198,116 @@ cmd_new() {
   exec "$0" "$ndir"
 }
 
-cmd_switch() {
-  local sessions
-  sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^rtide-' || true)
-  [[ -z "$sessions" ]] && { echo "no workspaces — run 'rtide new'"; exit 1; }
-  local pick=""
-  if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
-    pick=$(echo "$sessions" | fzf --prompt="workspace: ")
-  else
-    echo "$sessions" | nl
-    read -rp "Pick a workspace: " n
-    pick=$(echo "$sessions" | sed -n "${n}p")
+# Pick a workspace to resume (or start a new one). Used by bare `rtide` and
+# `rtide switch`. Sessions are listed with their directory (`#{session_path}` —
+# every workspace is created with `-c "$DIR"`); the one matching the current
+# working directory is sorted first and marked, so Enter resumes it directly.
+# Typing a name that matches nothing only searches — creation happens via the
+# `+ new workspace` row (or typing `new`), never by typing an unknown name.
+cmd_pick() {
+  local sessions cur s dir sdir disp
+  local -a items=()
+  sessions=$(tmux list-sessions -F "#{session_name}"$'\t'"#{session_path}" 2>/dev/null | grep '^rtide-' || true)
+  if [[ -z "$sessions" ]]; then
+    echo "no workspaces — start a new one"
+    exec "$0" new
   fi
-  [[ -n "$pick" ]] && {
-    tmux switch-client -t "$pick" 2>/dev/null \
-      || tmux attach -t "$pick" 2>/dev/null \
-      || echo "switch to $pick — attach with: tmux attach -t $pick"
-  }
-  exit 0
+  cur=$(realpath -m "$PWD")
+  local DIM=$'\033[2m' YEL=$'\033[33m' CYAN=$'\033[36m' RESET=$'\033[0m'
+  while IFS=$'\t' read -r s dir; do
+    # Prefer the first pane's real path — session_path can be stale/relative
+    # (workspaces created before paths were normalized) and would otherwise
+    # resolve against the picker's own cwd, not the workspace's.
+    pdir=$(tmux list-panes -t "$s" -F '#{pane_current_path}' 2>/dev/null | head -1)
+    sdir=$(realpath -m "${pdir:-$dir}")
+    disp="${DIM}${sdir/#$HOME/~}${RESET}"
+    if [[ "$sdir" == "$cur" ]]; then
+      # current dir first (fzf preselects line 1 → Enter resumes it)
+      items=("$s"$'\t'"$disp"$'\t'"${YEL}◀ you are here${RESET}" "${items[@]}")
+    else
+      items+=("$s"$'\t'"$disp")
+    fi
+  done <<< "$sessions"
+  items+=("${CYAN}+${RESET} new workspace")
+
+  if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
+    local out qry sel sess rc
+    while true; do
+      # `if` so `set -e` doesn't kill us on fzf's non-zero exits; rc tells
+      # abort (130 = Esc/Ctrl-C) apart from no-match (1 = Enter on a query
+      # that filtered everything out).
+      if out=$(printf '%s\n' "${items[@]}" | fzf --ansi --print-query \
+            --no-sort --layout=reverse --header-first \
+            --header=$'RTIDE — resume a workspace\nEnter = open   type "new" + Enter = start one   Esc = quit' \
+            --prompt='❯ ' --height=60% --border \
+            --preview-window=right:40% \
+            --preview 's={1}; if tmux has-session -t "$s" 2>/dev/null; then d=$(tmux list-panes -t "$s" -F "#{pane_current_path}" 2>/dev/null | head -1); [ -z "$d" ] && d=$(tmux display-message -p -t "$s" "#{session_path}"); echo "dir: $d"; [ -f "$d/.rtide/agent" ] && { echo; echo "agent:"; sed "s/^/    /" "$d/.rtide/agent"; }; act=$(tmux display-message -p -t "$s" "#{session_activity}"); [ -n "$act" ] && act=$(date -d "@$act" "+%H:%M  %a %d %b"); echo; echo "last: ${act:-?}   ·   $(tmux display-message -p -t "$s" "#{session_windows}")w  $(tmux display-message -p -t "$s" "#{session_attached}")attached"; tmux list-panes -t "$s" -F "    #{@rtide-role}   #{pane_width}x#{pane_height}"; else echo "start a new workspace (Enter)"; fi' ); then
+        rc=0
+      else
+        rc=$?
+      fi
+      (( rc == 130 )) && exit 0      # Esc / Ctrl-C → quit
+      qry=$(printf '%s\n' "$out" | head -1)
+      sel=$(printf '%s\n' "$out" | tail -1)
+      [[ -z "$sel" ]] && exit 0      # empty selection
+      if [[ "$sel" == *"new workspace"* ]]; then
+        # The create row itself is fuzzy-searchable: e.g. "nope" matches
+        # n→o→p→e in "new workspace". Only an empty query (the user moved
+        # onto the row) or an explicit "new…" query expresses create intent.
+        if [[ -z "$qry" || "$qry" == new* ]]; then
+          exec "$0" new
+        fi
+      else
+        sess=$(printf '%s' "$sel" | cut -f1)
+        if tmux has-session -t "$sess" 2>/dev/null; then
+          tmux switch-client -t "$sess" 2>/dev/null \
+            || tmux attach -t "$sess" 2>/dev/null \
+            || echo "switch to $sess — attach with: tmux attach -t $sess"
+          exit 0
+        fi
+      fi
+      # No match, including accidental fuzzy matches against the create row:
+      # unknown names search only and never create.
+      printf "no workspace matches '%s' — type 'new' to create one\n" "$qry" >&2
+      sleep 1
+    done
+  elif [[ -t 0 ]]; then
+    # fallback: numbered list (accept number or session name), Enter = first
+    local i=0 line ans
+    for line in "${items[@]}"; do
+      i=$((i+1))
+      printf '  %d) %s\n' "$i" "$(printf '%s' "$line" | sed -e 's/\x1b\[[0-9;]*m//g' | tr '\t' '  ')"
+    done
+    read -rp "Pick a workspace [1]: " ans
+    ans="${ans:-1}"
+    if [[ "$ans" == "new" ]]; then
+      exec "$0" new
+    elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#items[@]} )); then
+      sel="${items[$((ans-1))]}"
+    else
+      sel=$(printf '%s\n' "${items[@]}" | awk -F '\t' -v n="$ans" '$1==n{print; exit}')
+    fi
+    if [[ "$sel" == *"new workspace"* ]]; then
+      exec "$0" new
+    fi
+    if [[ -n "$sel" ]]; then
+      sess=$(printf '%s' "$sel" | cut -f1)
+      tmux switch-client -t "$sess" 2>/dev/null \
+        || tmux attach -t "$sess" 2>/dev/null \
+        || echo "switch to $sess — attach with: tmux attach -t $sess"
+    else
+      printf "no workspace matches '%s' — type 'new' to create one\n" "$ans" >&2
+      exit 1
+    fi
+    exit 0
+  else
+    # non-interactive (e.g. `prefix+r` → run-shell): show the list, take no action
+    local line
+    for line in "${items[@]}"; do
+      printf '%s\n' "$(printf '%s' "$line" | sed -e 's/\x1b\[[0-9;]*m//g' | tr '\t' '  ')"
+    done
+    exit 0
+  fi
 }
 
 cmd_ls() {
@@ -296,7 +394,7 @@ EOF
       | awk '$2=="agent"{print $1; exit}')
     if [[ -n "$pane" ]]; then
       tmux send-keys -t "$pane" C-c
-      tmux send-keys -t "$pane" "$("$PROVIDER_BIN" launch "$harness" "$provider" "$model")" Enter
+      tmux send-keys -t "$pane" "rtide-agent $harness $provider $model $dir" Enter
       echo "restarted agent pane in $sess"
     fi
   fi
@@ -312,6 +410,153 @@ cmd_auth() {
   exit $rc
 }
 
+# --- config & refresh -------------------------------------------------------
+
+CONFIG_KEYS="provider harness model default_dir agent_lines nvim_pct shell auto_float"
+
+# Rewrite ~/.rtide/config from the current shell vars (only known keys).
+write_global_config() {
+  local key
+  {
+    echo "# RTIDE config"
+    for key in $CONFIG_KEYS; do
+      echo "$key=${!key}"
+    done
+  } > "$CONFIG"
+}
+
+# View / edit / reset the global config (source of truth for layout; the combo
+# is per-workspace in .rtide/agent and managed by `rtide agent`).
+#   rtide config                        → show settings
+#   rtide config set k=v [k=v…]         → update keys
+#   rtide config reset [layout|agent|all] → restore built-in defaults (default: layout)
+cmd_config() {
+  local sub="${2:-}" key val scope def
+  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  case "$sub" in
+    "")
+      printf 'agent  %-12s %s\n' provider "$provider"
+      printf 'agent  %-12s %s\n' harness "$harness"
+      printf 'agent  %-12s %s\n' model "$model"
+      printf 'layout %-12s %s\n' agent_lines "${agent_lines:-3}"
+      printf 'layout %-12s %s\n' nvim_pct "${nvim_pct:-50}"
+      printf 'layout %-12s %s\n' shell "$shell"
+      printf 'layout %-12s %s\n' auto_float "$auto_float"
+      printf 'misc   %-12s %s\n' default_dir "$default_dir"
+      ;;
+    set)
+      shift 2
+      [[ $# -gt 0 ]] || { echo "usage: rtide config set key=value [key=value…]"; exit 1; }
+      for kv in "$@"; do
+        key="${kv%%=*}"; val="${kv#*=}"
+        [[ "$key" == "$kv" || -z "$key" ]] && { echo "config error: bad assignment '$kv' (want key=value)" >&2; exit 1; }
+        case "$key" in
+          provider|harness|model|default_dir|shell) ;;
+          agent_lines)
+            [[ "$val" =~ ^[0-9]+$ ]] && (( val >= 1 )) \
+              || { echo "config error: agent_lines must be a positive integer" >&2; exit 1; } ;;
+          nvim_pct)
+            [[ "$val" =~ ^[0-9]+$ ]] && (( val >= 1 && val <= 99 )) \
+              || { echo "config error: nvim_pct must be an integer 1-99" >&2; exit 1; } ;;
+          auto_float)
+            [[ "$val" =~ ^(true|false)$ ]] \
+              || { echo "config error: auto_float must be true or false" >&2; exit 1; } ;;
+          *) echo "config error: unknown key '$key' (known: $CONFIG_KEYS)" >&2; exit 1 ;;
+        esac
+        printf -v "$key" '%s' "$val"
+      done
+      write_global_config
+      echo "config: updated $CONFIG"
+      ;;
+    reset)
+      scope="${3:-layout}"
+      def=fish
+      command -v fish >/dev/null 2>&1 || def=zsh
+      case "$scope" in
+        layout) agent_lines=3; nvim_pct=50; auto_float=false; shell="$def" ;;
+        agent)  provider=""; harness=""; model="" ;;
+        all)    provider=""; harness=""; model=""; agent_lines=3; nvim_pct=50; auto_float=false; shell="$def" ;;
+        *) echo "usage: rtide config reset [layout|agent|all]" >&2; exit 1 ;;
+      esac
+      write_global_config
+      echo "config: reset $scope — run 'rtide refresh <workspace>' to apply"
+      ;;
+    *)
+      echo "usage: rtide config [set key=value… | reset [layout|agent|all]]" >&2
+      exit 1
+      ;;
+  esac
+  exit 0
+}
+
+# Apply the current global config's layout to a running workspace's panes.
+#   rtide refresh [session|dir]   (no arg → current session; prefix+R passes #{session_name})
+cmd_refresh() {
+  local arg="${2:-}" sess agent tweb w tw changed=""
+  if [[ -n "$arg" ]]; then
+    # A session name wins; anything else is a directory (basename may itself be rtide-*).
+    if tmux has-session -t "$arg" 2>/dev/null; then
+      sess="$arg"
+    else
+      sess="rtide-$(basename "$arg")"
+    fi
+  else
+    sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+  fi
+  [[ -n "$sess" ]] || { echo "refresh: not in a tmux session — pass a session: rtide refresh <dir|session>" >&2; exit 1; }
+  tmux has-session -t "$sess" 2>/dev/null || { echo "refresh: no workspace: $sess" >&2; exit 1; }
+  tmux list-windows -t "$sess" -F '#{window_name}' 2>/dev/null | grep -qx work \
+    || { echo "refresh: not an rtide workspace: $sess" >&2; exit 1; }
+
+  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  agent_lines="${agent_lines:-3}"
+  nvim_pct="${nvim_pct:-50}"
+
+  # unzoom first if a pane is zoomed, so the resize targets the real layout
+  if [[ "$(tmux display-message -p -t "$sess:work" '#{window_zoomed_flag}')" == "1" ]]; then
+    tmux resize-pane -Z -t "$(tmux display-message -p -t "$sess:work" '#{pane_id}')"
+  fi
+
+  agent=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="agent"{print $1; exit}')
+  tweb=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="tweb"{print $1; exit}')
+  w=$(tmux display-message -p -t "$sess:work" '#{window_width}' 2>/dev/null || echo 80)
+  tw=$(( w * nvim_pct / 100 )); (( tw < 10 )) && tw=10
+
+  if [[ -n "$agent" ]]; then
+    tmux resize-pane -t "$agent" -y "$agent_lines"
+    changed="strip→${agent_lines}L"
+  fi
+  if [[ -n "$tweb" ]]; then
+    tmux resize-pane -t "$tweb" -x "$tw"
+    changed="${changed:+$changed, }tweb→${nvim_pct}%"
+  fi
+  [[ -n "$changed" ]] || { echo "refresh: no panes to resize in $sess" >&2; exit 1; }
+  echo "refresh: $sess — $changed"
+  exit 0
+}
+
+# Open the workspace quick-switcher menu (prefix+M). Interactive items run in a
+# display-popup so fzf pickers get a tty; the rest run directly via run-shell.
+#   rtide menu [session]   (no arg → current session)
+cmd_menu() {
+  local sess="${2:-$(tmux display-message -p '#{session_name}' 2>/dev/null || true)}"
+  [[ -n "$sess" ]] || { echo "menu: not in a tmux session — pass a session: rtide menu <session>" >&2; exit 1; }
+  tmux display-menu -T "#[align=centre] RTIDE — ${sess}" -x C -y C \
+    "Switch workspace" r "display-popup -E -w 80% -h 70% 'rtide switch'" \
+    "Change agent…"    m "display-popup -E -w 80% -h 70% 'rtide agent'" \
+    "New workspace…"   n "display-popup -E -w 80% -h 70% 'rtide new'" \
+    "" \
+    "Refresh layout"   R "run-shell 'rtide refresh ${sess}'" \
+    "Zoom tweb"        t "run-shell 'rtide zoom tweb'" \
+    "Zoom agent"       a "run-shell 'rtide zoom agent'" \
+    "Config…"          c "display-popup -E -w 70% -h 50% 'sh -c \"rtide config; echo; read -p done\"'" \
+    "Sweep memories"   s "run-shell 'rtide sweep'" \
+    "" \
+    "Detach"           d "detach-client" \
+    "Quit workspace"   q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit ${sess}'\""
+  exit 0
+}
+
 # Bind a key in the prefix table only if it's not already bound (don't clobber)
 bind_if_free() {
   local key="$1" cmd="$2"
@@ -325,7 +570,7 @@ case "${1:-}" in
   setup)  setup_wizard; exit 0 ;;
   doctor) cmd_doctor; exit 0 ;;
   new)    cmd_new ;;
-  switch) cmd_switch ;;
+  switch) cmd_pick ;;
   zoom)   cmd_zoom "$@" ;;
   ls)     cmd_ls ;;
   sweep)  cmd_sweep ;;
@@ -333,6 +578,9 @@ case "${1:-}" in
   kill)   cmd_quit "$@" ;;
   agent)  cmd_agent "$@" ;;
   auth)   cmd_auth "$@" ;;
+  config) cmd_config "$@" ;;
+  refresh) cmd_refresh "$@" ;;
+  menu)   cmd_menu "$@" ;;
   matrix) "$PROVIDER_BIN" matrix; exit 0 ;;
 esac
 
@@ -342,13 +590,18 @@ source "$CONFIG"
 
 # legacy: agent= → harness=
 harness="${harness:-${agent:-}}"
-agent_pct="${agent_pct:-30}"   # agent strip height as % of window (top panes get the rest)
+agent_lines="${agent_lines:-3}"   # agent strip height in lines — minimal input box (status + prompt)
+
+# Bare `rtide` → pick an active workspace to resume, or start a new one.
+if [[ -z "${1:-}" ]]; then
+  cmd_pick
+fi
 
 DIR="${1:-${default_dir:-$(pwd)}}"
-DIR="${DIR/#\~/$HOME}"   # expand a leading ~ (rtide new passes the dir as typed)
+DIR="${DIR/#\~/$HOME}"       # expand a leading ~ (rtide new passes the dir as typed)
+DIR="$(realpath -m "$DIR")"  # absolute — relative dirs otherwise break nvim --listen, session path, welcome page
 
 mkdir -p "$DIR"   # create the workspace dir if it doesn't exist yet
-tweb doctor --fix >/dev/null 2>&1 || true
 
 # Seed per-project convention files (never clobber)
 for f in AGENTS.md CLAUDE.md; do
@@ -398,7 +651,9 @@ if ! "$PROVIDER_BIN" compat "$provider" 2>/dev/null | grep -qw "$harness"; then
   fi
 fi
 
-AGENT_CMD=$("$PROVIDER_BIN" launch "$harness" "$provider" "$model")
+# The agent pane runs the minimal input-box wrapper (rtide-agent), which
+# invokes the harness non-interactively per request and renders to tweb.
+AGENT_CMD="rtide-agent $harness $provider $model $DIR"
 
 # Build the layout with pane IDs (index-agnostic — respects base-index settings).
 # Each pane gets a pane-scoped @rtide-role option (survives title changes by apps).
@@ -406,8 +661,8 @@ tmux new-session -d -s "$S" -n work -c "$DIR"
 NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
 tmux select-pane -t "$NVIM_PANE" -T nvim
-tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim" Enter
-tmux split-window -v -t "$NVIM_PANE" -p "$agent_pct"
+tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim --listen '$DIR/.rtide/nvim.sock'" Enter
+tmux split-window -v -t "$NVIM_PANE" -l "$agent_lines"
 AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
 tmux set-option -p -t "$AGENT_PANE" @rtide-role agent
 tmux select-pane -t "$AGENT_PANE" -T agent
@@ -415,13 +670,27 @@ tmux split-window -h -t "$NVIM_PANE" -p "$nvim_pct"
 TWEB_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')
 tmux set-option -p -t "$TWEB_PANE" @rtide-role tweb
 tmux select-pane -t "$TWEB_PANE" -T tweb
-tmux send-keys -t "$TWEB_PANE" 'tweb open' Enter
+# generate the per-workspace welcome page, then open it in tweb
+python3 - "$TWEB_DIR/welcome.html" "$DIR/.tweb/welcome.html" "$S" "$DIR" "$provider" "$harness" "$model" <<'PY'
+import sys, datetime
+tpl, out, ws, path, prov, harness, model = sys.argv[1:8]
+html = open(tpl).read()
+for k, v in [("{{WORKSPACE}}", ws), ("{{PATH}}", path), ("{{PROVIDER}}", prov),
+             ("{{HARNESS}}", harness), ("{{MODEL}}", model),
+             ("{{DATE}}", datetime.date.today().isoformat())]:
+    html = html.replace(k, v)
+open(out, "w").write(html)
+PY
+tmux send-keys -t "$TWEB_PANE" "tweb open file://$DIR/.tweb/welcome.html" Enter
 tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
 # Global bindings that resolve panes by title in the current session at press-time
 bind_if_free t "run-shell 'rtide zoom tweb'"
 bind_if_free a "run-shell 'rtide zoom agent'"
 bind_if_free r "run-shell 'rtide switch'"
 bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
+bind_if_free R "run-shell 'rtide refresh #{session_name}'"
+bind_if_free M "run-shell 'rtide menu #{session_name}'"
+tmux select-window -t "$S:work"
 tmux select-pane -t "$NVIM_PANE"
 if [[ -z "${TMUX:-}" ]]; then
   tmux attach -t "$S" 2>/dev/null || echo "workspace $S created — attach with: tmux attach -t $S"

@@ -6,37 +6,32 @@
 #   cmd | tweb-render -         wrap piped output in a minimal dark page
 set -euo pipefail
 
-# Show a page in the existing tweb pane; if none is running, open a browser here.
-# `tweb navigate` targets the running browser pane no matter where it is invoked,
-# so this works from the agent pane, nvim's :terminal, or a plain shell.
-tweb_show() {
-  local url="$1"
-  tweb navigate "$url" 2>/dev/null && return 0
-  tweb open "$url"
-}
+SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
+# shellcheck source=bin/rtide-tweb-common
+source "$SCRIPT_DIR/rtide-tweb-common"
 
 FLOAT=0
 case "${1:-}" in
   --float) FLOAT=1; shift ;;
-  --url)   shift; tweb_show "$1"; [[ $FLOAT -eq 1 ]] && tweb float; exit 0 ;;
+  --url)   shift; rtide_tweb_show "${1:?usage: tweb-render --url <url>}" "$FLOAT"; exit ;;
 esac
 
 FILE="${1:?usage: tweb-render [--float] <file>}"
 
 if [[ "$FILE" == "-" ]]; then
   # stdin: wrap piped output in a minimal dark page
-  OUT="$HOME/.cache/rtide/pipe.html"
+  rtide_tweb_prepare
+  OUT="$HOME/.cache/rtide/$RTIDE_TWEB_CACHE_KEY/pipe.html"
   mkdir -p "$(dirname "$OUT")"
   {
     echo "<!DOCTYPE html><html><head><meta charset=utf-8><title>pipe</title>"
     echo "<style>body{background:#0d1117;color:#e6edf3;font-family:ui-monospace,monospace;padding:2rem;max-width:900px;margin:0 auto}pre{white-space:pre-wrap}</style></head><body><pre>"
-    cat
+    rtide_html_escape
     echo "</pre></body></html>"
   } > "$OUT"
-  tweb_show "file://$OUT"
-  [[ $FLOAT -eq 1 ]] && tweb float
+  rtide_tweb_show "file://$OUT" "$FLOAT"
   exit 0
 fi
 
-tweb_show "file://$(realpath "$FILE")"
-[[ $FLOAT -eq 1 ]] && tweb float
+rtide_tweb_prepare
+rtide_tweb_show "file://$(realpath "$FILE")" "$FLOAT"

@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""rtide-agent — minimal agent input box for RTIDE.
+
+Runs the configured harness non-interactively for each request, shows a
+one-line status in the agent pane, and renders the conversation to the
+workspace's tweb pane. Files the agent creates/edits open in nvim via
+`rtide-open` (see AGENTS.md).
+
+Usage: rtide-agent <harness> <provider> <model> <dir>
+"""
+import html as H
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+SELF_DIR = os.path.dirname(os.path.realpath(__file__))
+PROVIDER_BIN = os.path.join(SELF_DIR, "rtide-provider")
+TWEB_RENDER = os.path.join(SELF_DIR, "tweb-render")
+
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+RESET = "\033[0m"
+
+
+def clear():
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+
+def status(msg):
+    sys.stdout.write(msg + "\n")
+    sys.stdout.flush()
+
+
+def idle_status():
+    status(f"{GREEN}●{RESET} idle — type a request (Ctrl-d to quit)")
+
+
+def working_status(tool=None):
+    if tool:
+        status(f"{YELLOW}●{RESET} working: {tool}")
+    else:
+        status(f"{YELLOW}●{RESET} working…")
+
+
+def done_status(secs):
+    status(f"{GREEN}●{RESET} done ({secs:.0f}s)")
+
+
+def error_status(msg):
+    status(f"{RED}●{RESET} error: {msg[:100]}")
+
+
+def get_run_cmd(harness, provider, model, prompt, session):
+    """Ask rtide-provider for the non-interactive command for one request."""
+    args = [PROVIDER_BIN, "run", harness, provider, model, prompt]
+    if session:
+        args.append(session)
+    out = subprocess.run(args, capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip() or "rtide-provider run failed")
+    return out.stdout.strip()
+
+
+def parse_line(harness, line):
+    """Return (text, session_id, tool) from one JSON event line."""
+    try:
+        obj = json.loads(line)
+    except Exception:
+        return None, None, None
+    if harness == "claude":
+        typ = obj.get("type")
+        if typ == "system" and obj.get("subtype") == "init":
+            return None, obj.get("session_id"), None
+        if typ == "assistant":
+            for c in obj.get("message", {}).get("content", []):
+                if c.get("type") == "text":
+                    return c.get("text", ""), None, None
+                if c.get("type") == "tool_use":
+                    inp = c.get("input", {})
+                    f = inp.get("file_path") or inp.get("path") or ""
+                    return None, None, f"{c.get('name', '')} {f}".strip()
+        if typ == "result":
+            return obj.get("result", ""), None, None
+    elif harness == "codex":
+        typ = obj.get("type")
+        if typ == "thread.started":
+            return None, obj.get("thread_id"), None
+        if typ == "item.completed":
+            item = obj.get("item", {})
+            itype = item.get("type")
+            if itype == "agent_message":
+                return item.get("text", ""), None, None
+            if itype == "function_call":
+                name = item.get("name", "")
+                args = item.get("arguments", "")
+                return None, None, f"{name} {args[:40]}".strip()
+        if typ == "turn.failed":
+            err = obj.get("error", {})
+            msg = err.get("message", "") if isinstance(err, dict) else str(err)
+            return f"(error: {msg})", None, None
+    return None, None, None
+
+
+def run_harness(cmd, harness, on_tool):
+    """Run the harness command, streaming events. Returns (text, session_id, rc)."""
+    text_parts = []
+    raw_parts = []
+    session_id = None
+    proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True,
+                            stdin=subprocess.DEVNULL)
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        raw_parts.append(line)
+        t, sid, tool = parse_line(harness, line)
+        if t:
+            text_parts.append(t)
+        if sid:
+            session_id = sid
+        if tool:
+            on_tool(tool)
+    proc.wait()
+    rc = proc.returncode
+    text = "".join(text_parts).strip()
+    if not text:
+        # plain-text harness (hermes/opencode) or parse gap: use raw output
+        text = "\n".join(raw_parts).strip()
+    return text, session_id, rc
+
+
+def md_to_html(text):
+    """Minimal markdown → HTML (escape, code fences, headings, lists, inline)."""
+    out = []
+    in_code = False
+    for line in text.split("\n"):
+        if line.strip().startswith("```"):
+            if in_code:
+                out.append("</code></pre>")
+                in_code = False
+            else:
+                out.append("<pre><code>")
+                in_code = True
+            continue
+        if in_code:
+            out.append(H.escape(line))
+            continue
+        s = H.escape(line)
+        s = re.sub(r'`([^`]+)`', r'<code>\1</code>', s)
+        s = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', s)
+        s = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', s)
+        st = s.strip()
+        if st.startswith("### "):
+            out.append(f"<h4>{s[4:]}</h4>")
+        elif st.startswith("## "):
+            out.append(f"<h3>{s[3:]}</h3>")
+        elif st.startswith("# "):
+            out.append(f"<h2>{s[2:]}</h2>")
+        elif st.startswith("- "):
+            out.append(f"<li>{s[2:]}</li>")
+        elif st == "":
+            out.append("")
+        else:
+            out.append(f"<p>{s}</p>")
+    if in_code:
+        out.append("</code></pre>")
+    return "\n".join(out)
+
+
+PAGE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent — {workspace}</title>
+<style>
+  :root{{color-scheme:dark}}
+  *{{box-sizing:border-box}}
+  body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.6;margin:0;padding:2rem 1rem}}
+  main{{max-width:900px;margin:0 auto}}
+  .msg{{margin:1.5rem 0}}
+  .who{{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:#8b949e;margin-bottom:.25rem}}
+  .user .who{{color:#58a6ff}}
+  .body{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:.75rem 1rem}}
+  .user .body{{background:#0d1117;border-color:#1f6feb}}
+  pre{{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:.75rem;overflow-x:auto}}
+  code{{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}}
+  p{{margin:.5rem 0}}
+  h2,h3,h4{{color:#58a6ff}}
+  li{{margin:.25rem 0}}
+</style></head><body><main>
+{body}
+</main>
+<script>
+window.scrollTo(0, document.body.scrollHeight);
+addEventListener('load', function () {{ window.scrollTo(0, document.body.scrollHeight); }});
+</script>
+</body></html>"""
+
+
+def build_html(conversation, workspace):
+    parts = []
+    for role, text in conversation:
+        who = "you" if role == "user" else "agent"
+        cls = "user" if role == "user" else "agent"
+        body = md_to_html(text)
+        parts.append(f'<div class="msg {cls}"><div class="who">{who}</div>'
+                     f'<div class="body">{body}</div></div>')
+    return PAGE.format(workspace=H.escape(workspace), body="\n".join(parts))
+
+
+def main():
+    if len(sys.argv) < 5:
+        print("usage: rtide-agent <harness> <provider> <model> <dir>", file=sys.stderr)
+        sys.exit(1)
+    harness, provider, model, wdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+
+    tweb_dir = os.path.join(wdir, ".tweb")
+    os.makedirs(tweb_dir, exist_ok=True)
+    html_path = os.path.join(tweb_dir, "agent.html")
+    session_file = os.path.join(wdir, ".rtide", "agent-session")
+
+    # resume a previous session for this harness, if any
+    session_id = None
+    if os.path.exists(session_file):
+        saved = open(session_file).read().strip()
+        if saved.startswith(harness + ":"):
+            session_id = saved.split(":", 1)[1]
+
+    conversation = []
+    workspace = os.path.basename(wdir)
+
+    clear()
+    status(f"rtide-agent: {harness} + {provider} ({model})")
+    idle_status()
+
+    while True:
+        try:
+            req = input("> ")
+        except (EOFError, KeyboardInterrupt):
+            clear()
+            status("bye")
+            break
+        req = req.strip()
+        if not req:
+            continue
+
+        clear()
+        working_status()
+        t0 = time.time()
+        try:
+            cmd = get_run_cmd(harness, provider, model, req, session_id)
+            text, sid, rc = run_harness(cmd, harness, working_status)
+        except Exception as e:
+            clear()
+            error_status(str(e))
+            continue
+        if sid:
+            session_id = sid
+            with open(session_file, "w") as f:
+                f.write(f"{harness}:{sid}")
+        dt = time.time() - t0
+
+        clear()
+        if rc != 0:
+            error_status(f"exit {rc}")
+        else:
+            done_status(dt)
+
+        conversation.append(("user", req))
+        conversation.append(("agent", text or f"(no output — exit {rc})"))
+        with open(html_path, "w") as f:
+            f.write(build_html(conversation, workspace))
+        subprocess.run([TWEB_RENDER, html_path], capture_output=True)
+
+
+if __name__ == "__main__":
+    main()

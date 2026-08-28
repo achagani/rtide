@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${FAKE_TWEB_LOG:?FAKE_TWEB_LOG is required}"
+printf '%q ' "$@" >> "$FAKE_TWEB_LOG"
+printf '\n' >> "$FAKE_TWEB_LOG"

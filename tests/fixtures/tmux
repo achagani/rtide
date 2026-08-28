@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  display-message)
+    printf '%s\n' "${FAKE_SESSION:-rtide-test}"
+    ;;
+  list-panes)
+    printf '%b' "${FAKE_PANES:-%1 nvim\n%2 agent\n%3 tweb\n}"
+    ;;
+  *)
+    printf 'unexpected tmux call: %q' "$1" >&2
+    exit 64
+    ;;
+esac

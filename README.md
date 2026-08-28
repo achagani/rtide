@@ -13,9 +13,12 @@ channeled through **tweb** as graphically rich HTML.
 └─────────────────────────────┘
 ```
 
-The agent strip is a thin input/output bar at the bottom (default 30% of the
-window, set with `agent_pct` in `~/.rtide/config`); the nvim + tweb panes get
-the rest. Zoom it with `prefix+a` when you need to work in it.
+The agent strip is a thin **input box** at the bottom — exactly as tall as its
+content (3 lines by default, set with `agent_lines` in `~/.rtide/config`); the
+nvim + tweb panes get the rest. It shows a one-line status (`● idle` / `● working: Edit src/app.py` /
+`● done (12s)`) and a prompt — type a request, and the harness runs
+non-interactively, rendering its response to tweb. Zoom it with `prefix+a` when
+you need to work in it.
 
 ## What you get
 
@@ -26,10 +29,18 @@ the rest. Zoom it with `prefix+a` when you need to work in it.
   to the chosen provider (env vars / CLI flags)
 - **tweb as the output surface** — the agent renders answers as self-contained HTML
   (charts, tables, cards) in the tweb pane; the terminal stays minimal
+- **Welcome screen** — each new workspace opens with a branded welcome page in tweb
+  (workspace, provider/harness/model, keybindings)
+- **Agent as an input box** — the agent pane is a pure input line with a one-line
+  status; the harness runs non-interactively per request (`claude -p` / `codex exec` /
+  `hermes chat -q` / `opencode run`) and the conversation renders in tweb,
+  auto-scrolling to the newest message
+- **Files in the editor** — files the agent creates or edits open in the nvim pane
+  via `rtide-open <path>` (a convention the agent follows)
 - **Agent-independent memory** — one store every agent reads and writes through the
   same interface (`rtide-mem`), with an auto-updater that captures `MEM:` lines
 - **Hip shell surface** — `:terminal` in nvim opens your configured shell (fish by
-  default); `tweb run <cmd>` renders program output in tweb
+  default); `tweb-run <cmd>` renders program output in the current workspace's tweb pane
 - **Multi-tasking** — `prefix+r` jumps between workspaces; `rtide ls` shows the fleet
 
 ## Install
@@ -90,15 +101,18 @@ and restarts its agent pane.
 ## Usage
 
 ```
-rtide            → launch/attach the default workspace (first run walks through setup)
+rtide            → pick a workspace to resume or start one (unknown names only search; type `new` or pick `+ new workspace` to create — first run walks through setup)
 rtide <dir>      → launch/attach the workspace for <dir> (prompts for provider/harness/model)
 rtide new        → guided new workspace
-rtide switch     → picker over all rtide-* sessions (fzf if present)
+rtide switch     → same picker as bare rtide (resume / new)
 rtide ls         → list workspaces
 rtide sweep      → capture pending MEM: memories from every live session
 rtide quit [dir] → sweep that session's memories, then kill it (from inside or out)
 rtide kill [dir] → alias for quit
 rtide agent      → re-pick provider/harness/model for the current workspace
+rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
+rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
+rtide menu       → open the quick-switcher menu for a session (prefix+M)
 rtide auth       → check auth for the configured provider
 rtide matrix     → print the provider×harness compatibility matrix
 rtide setup      → re-run the wizard
@@ -112,9 +126,25 @@ rtide --no-ask   → skip the provider/harness prompt (use stored config)
 prefix+t → zoom tweb      (chat mode)
 prefix+a → zoom agent
 prefix+r → switch workspace
+prefix+R → refresh workspace layout (apply global config to panes)
+prefix+M → quick-switcher menu (switch / change agent / new / refresh / zoom / config / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)
 ```
+
+**Applying settings** — layout settings (`agent_lines`, `nvim_pct`, `shell`) live only in
+`~/.rtide/config`: the single source of truth, read at launch. `rtide refresh` re-reads it
+and applies it to a **running** workspace — no relaunch, nothing materialized per-workspace.
+
+| You want to… | Do this |
+|---|---|
+| Refresh current workspace's layout | `prefix+R` — any pane in the workspace |
+| From a shell inside the workspace | `rtide refresh` (resolves the current session) |
+| From outside tmux | `rtide refresh <dir-or-session>` |
+| View / change / reset settings | `rtide config` · `rtide config set key=value` · `rtide config reset` |
+
+The provider/harness/model combo stays per-workspace in `.rtide/agent` (`rtide agent`
+re-picks it) and is never touched by `rtide refresh`.
 
 `prefix+Q` is the clean way out: it confirms, captures any pending `MEM:` lines
 from the agent pane, then kills the session (detaching you back to your shell).
@@ -124,7 +154,8 @@ from the agent pane, then kills the session (detaching you back to your shell).
 
 The agent follows the rules in `AGENTS.md` / `CLAUDE.md` (seeded per project, never
 clobbered): terminal is the input surface (one-line status only), substantive output
-is rendered as HTML in tweb, and durable facts are emitted as `MEM: <slug> — <fact>`
+is rendered as HTML in tweb, files it creates or edits are opened in the editor pane
+via `rtide-open <path>`, and durable facts are emitted as `MEM: <slug> — <fact>`
 one-liners that the sweep auto-persists to memory.
 
 ## Layout
@@ -136,9 +167,11 @@ is created by the installer and holds config + data.
 ~/rtide/                  # source (git repo)
 ├── install.sh
 ├── bin/rtide             # workspace launcher
-├── bin/rtide-provider    # provider/harness knowledge base (compat, launch, check, models)
+├── bin/rtide-provider    # provider/harness knowledge base (compat, launch, run, check, models)
 ├── bin/rtide-mcp         # MCP wiring helper (tweb + rtide-mem)
 ├── bin/rtide-mem         # agent-independent memory (CLI + MCP server)
+├── bin/rtide-agent       # minimal agent input box (status + prompt, renders to tweb)
+├── bin/rtide-open        # open a file in the workspace's nvim pane
 ├── bin/tweb-render       # render helper (file / stdin)
 ├── bin/tweb-run          # run a command, render output in tweb
 └── share/AGENTS.md       # convention source
@@ -152,3 +185,16 @@ is created by the installer and holds config + data.
 Per-project (seeded automatically): `AGENTS.md`, `CLAUDE.md`, `.tweb/` (gitignored),
 `.rtide/agent` (per-workspace provider/harness/model override), `.rtide/memory/`
 (committed).
+
+### Output routing
+
+Use `tweb-render <file>` or `tweb-run <command>` from an RTIDE agent or nvim terminal.
+The helpers resolve the current tmux session's pane tagged `@rtide-role=tweb`, so
+multiple workspaces cannot steal each other's output. They fail clearly if that pane
+is missing or duplicated instead of starting a blocking browser in the caller's pane.
+Generated command and pipe reports are HTML-escaped and stored under a per-session
+cache directory in `~/.cache/rtide/`.
+
+Use `rtide-open <file>` to open a file in the workspace's nvim pane. It finds the
+workspace root (nearest `.rtide/` dir) and talks to nvim over its `--listen` socket
+(`.rtide/nvim.sock`), so it works from any subdirectory and any harness.

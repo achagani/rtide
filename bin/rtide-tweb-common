@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+# Shared output routing for tweb-render and tweb-run.
+# Call rtide_tweb_prepare before choosing a cache path, then rtide_tweb_show.
+
+rtide_tweb_prepare() {
+  [[ -n "${RTIDE_TWEB_MODE:-}" ]] && return 0
+
+  RTIDE_TWEB_MODE=standalone
+  RTIDE_TWEB_PANE=
+  RTIDE_TWEB_SESSION=standalone
+
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    local session pane role
+    local -a matches=()
+    session=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null || true)
+    if [[ -n "$session" ]]; then
+      RTIDE_TWEB_SESSION="$session"
+      while read -r pane role; do
+        [[ "$role" == tweb ]] && matches+=("$pane")
+      done < <(tmux list-panes -t "$session:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null || true)
+
+      if (( ${#matches[@]} == 1 )); then
+        RTIDE_TWEB_MODE=managed
+        RTIDE_TWEB_PANE="${matches[0]}"
+      elif (( ${#matches[@]} > 1 )); then
+        printf 'tweb output error: multiple role=tweb panes in %s\n' "$session" >&2
+        return 2
+      elif [[ "$session" == rtide-* ]]; then
+        printf 'tweb output error: no role=tweb pane in %s\n' "$session" >&2
+        return 2
+      fi
+    fi
+  fi
+
+  RTIDE_TWEB_CACHE_KEY=${RTIDE_TWEB_SESSION//[^a-zA-Z0-9_.-]/_}
+  export RTIDE_TWEB_MODE RTIDE_TWEB_PANE RTIDE_TWEB_SESSION RTIDE_TWEB_CACHE_KEY
+}
+
+rtide_tweb_show() {
+  local url="$1" float="${2:-0}"
+  rtide_tweb_prepare || return
+
+  if [[ "$RTIDE_TWEB_MODE" == managed ]]; then
+    tweb navigate --pane "$RTIDE_TWEB_PANE" "$url" || {
+      printf 'tweb output error: navigation failed for pane %s\n' "$RTIDE_TWEB_PANE" >&2
+      return 1
+    }
+    if [[ "$float" == 1 ]]; then
+      tweb float --pane "$RTIDE_TWEB_PANE"
+    fi
+    return 0
+  fi
+
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    printf 'tweb output error: no RTIDE tweb pane; refusing a blocking browser in a noninteractive shell\n' >&2
+    return 1
+  fi
+  tweb open "$url"
+}
+
+rtide_html_escape() {
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+      -e 's/"/\&quot;/g' -e "s/'/\&#39;/g"
+}
