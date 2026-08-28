@@ -34,6 +34,9 @@ TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%
   "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html" || fail 'managed render failed'
 assert_log 'navigate --pane %9'
 assert_no_log 'open '
+grep -F "file://$TEST_TMP/pages/page with spaces.html" \
+  "$HOME/.cache/rtide/rtide-alpha/last-render" >/dev/null \
+  || fail 'managed render did not record its target'
 
 # Float must target the same pane instead of relying on global inference.
 reset_log

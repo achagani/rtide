@@ -34,7 +34,8 @@ rtide_tweb_prepare() {
   fi
 
   RTIDE_TWEB_CACHE_KEY=${RTIDE_TWEB_SESSION//[^a-zA-Z0-9_.-]/_}
-  export RTIDE_TWEB_MODE RTIDE_TWEB_PANE RTIDE_TWEB_SESSION RTIDE_TWEB_CACHE_KEY
+  RTIDE_TWEB_LAST_RENDER="$HOME/.cache/rtide/$RTIDE_TWEB_CACHE_KEY/last-render"
+  export RTIDE_TWEB_MODE RTIDE_TWEB_PANE RTIDE_TWEB_SESSION RTIDE_TWEB_CACHE_KEY RTIDE_TWEB_LAST_RENDER
 }
 
 rtide_tweb_show() {
@@ -46,6 +47,8 @@ rtide_tweb_show() {
       printf 'tweb output error: navigation failed for pane %s\n' "$RTIDE_TWEB_PANE" >&2
       return 1
     }
+    mkdir -p "$(dirname "$RTIDE_TWEB_LAST_RENDER")"
+    printf '%s\n' "$url" > "$RTIDE_TWEB_LAST_RENDER"
     if [[ "$float" == 1 ]]; then
       tweb float --pane "$RTIDE_TWEB_PANE"
     fi

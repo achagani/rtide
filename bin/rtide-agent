@@ -12,6 +12,8 @@ import html as H
 import json
 import os
 import re
+import selectors
+import shutil
 import subprocess
 import sys
 import time
@@ -23,12 +25,45 @@ TWEB_RENDER = os.path.join(SELF_DIR, "tweb-render")
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
+CYAN = "\033[36m"
+BLUE = "\033[34m"
+MAGENTA = "\033[35m"
+DIM = "\033[2m"
 RESET = "\033[0m"
 
 
 def clear():
-    sys.stdout.write("\033[2J\033[H")
+    # Erase the visible pane and its tmux scrollback so a submitted request
+    # does not remain above the fresh prompt after the turn completes.
+    sys.stdout.write("\033[3J\033[2J\033[H")
     sys.stdout.flush()
+
+
+def render_marker_path():
+    """Return the workspace session's successful-render marker path."""
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        return None
+    result = subprocess.run(
+        ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    key = re.sub(r"[^a-zA-Z0-9_.-]", "_", result.stdout.strip())
+    return os.path.join(os.path.expanduser("~"), ".cache", "rtide", key, "last-render")
+
+
+def marker_version(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except (OSError, TypeError):
+        return None
+
+
+def artifact_rendered(path, before):
+    """Whether a successful tweb render occurred since the turn began."""
+    return marker_version(path) != before
 
 
 def status(msg):
@@ -40,11 +75,40 @@ def idle_status():
     status(f"{GREEN}●{RESET} idle — type a request (Ctrl-d to quit)")
 
 
-def working_status(tool=None):
-    if tool:
-        status(f"{YELLOW}●{RESET} working: {tool}")
-    else:
-        status(f"{YELLOW}●{RESET} working…")
+def activity(event=None):
+    """Return the agent-emitted activity text and a presentation color."""
+    if not event:
+        return "", CYAN
+    raw = " ".join(str(event).split())
+    if raw.startswith("@note "):
+        return raw[6:], CYAN
+    name = raw.partition(" ")[0].lower()
+    if any(k in name for k in ("read", "grep", "glob", "find", "search", "fetch")):
+        return raw, BLUE
+    if any(k in name for k in ("edit", "write", "patch", "file_change", "notebook")):
+        return raw, MAGENTA
+    if any(k in name for k in ("bash", "exec", "command", "shell", "run")):
+        return raw, YELLOW
+    if any(k in name for k in ("render", "tweb", "browser", "screenshot")):
+        return raw, MAGENTA
+    return raw, CYAN
+
+
+def working_status(tool=None, elapsed=0):
+    detail, color = activity(tool)
+    timer = f"{int(elapsed)}s"
+    # ANSI sequences do not consume columns. Budget using only visible text,
+    # and collapse tool arguments so a status can never wrap the 3-line pane.
+    prefix = f"● working {timer}"
+    width = shutil.get_terminal_size((80, 24)).columns
+    room = max(0, width - len(prefix) - (3 if detail else 0))
+    detail = detail[:room].rstrip()
+    suffix = f" {DIM}·{RESET} {color}{detail}{RESET}" if detail else ""
+    # Timer ticks and activity events replace the same physical line.
+    sys.stdout.write(
+        f"\r\033[2K{YELLOW}●{RESET} working {CYAN}{timer}{RESET}{suffix}"
+    )
+    sys.stdout.flush()
 
 
 def done_status(secs):
@@ -77,28 +141,50 @@ def parse_line(harness, line):
         if typ == "system" and obj.get("subtype") == "init":
             return None, obj.get("session_id"), None
         if typ == "assistant":
+            texts = []
+            tool = None
             for c in obj.get("message", {}).get("content", []):
                 if c.get("type") == "text":
-                    return c.get("text", ""), None, None
+                    texts.append(c.get("text", ""))
                 if c.get("type") == "tool_use":
                     inp = c.get("input", {})
                     f = inp.get("file_path") or inp.get("path") or ""
-                    return None, None, f"{c.get('name', '')} {f}".strip()
+                    if not f:
+                        f = inp.get("command") or inp.get("query") or ""
+                    tool = f"{c.get('name', '')} {f}".strip()
+            return "".join(texts) or None, None, tool
         if typ == "result":
             return obj.get("result", ""), None, None
     elif harness == "codex":
         typ = obj.get("type")
         if typ == "thread.started":
             return None, obj.get("thread_id"), None
-        if typ == "item.completed":
+        if typ in ("item.started", "item.completed"):
             item = obj.get("item", {})
             itype = item.get("type")
             if itype == "agent_message":
-                return item.get("text", ""), None, None
+                if typ == "item.completed":
+                    return item.get("text", ""), None, None
+                return None, None, None
             if itype == "function_call":
                 name = item.get("name", "")
                 args = item.get("arguments", "")
                 return None, None, f"{name} {args[:40]}".strip()
+            if itype == "command_execution":
+                return None, None, f"command {item.get('command', '')}".strip()
+            if itype == "file_change":
+                changes = item.get("changes", [])
+                paths = [c.get("path", "") for c in changes if isinstance(c, dict)]
+                return None, None, f"file_change {' '.join(filter(None, paths))}".strip()
+            if itype == "mcp_tool_call":
+                name = item.get("tool") or item.get("name") or "tool"
+                return None, None, str(name)
+            if itype == "web_search":
+                return None, None, f"web_search {item.get('query', '')}".strip()
+            if itype == "reasoning":
+                note = item.get("text") or item.get("summary") or ""
+                if note:
+                    return None, None, f"@note {note}"
         if typ == "turn.failed":
             err = obj.get("error", {})
             msg = err.get("message", "") if isinstance(err, dict) else str(err)
@@ -114,18 +200,35 @@ def run_harness(cmd, harness, on_tool):
     proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
                             stdin=subprocess.DEVNULL)
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        raw_parts.append(line)
-        t, sid, tool = parse_line(harness, line)
-        if t:
-            text_parts.append(t)
-        if sid:
-            session_id = sid
-        if tool:
-            on_tool(tool)
+    stream = selectors.DefaultSelector()
+    stream.register(proc.stdout, selectors.EVENT_READ)
+    started = time.monotonic()
+    current_activity = None
+    while True:
+        events = stream.select(timeout=0.2)
+        if events:
+            line = proc.stdout.readline()
+            if line == "":
+                break
+            line = line.strip()
+            if not line:
+                continue
+            raw_parts.append(line)
+            t, sid, tool = parse_line(harness, line)
+            if t:
+                text_parts.append(t)
+                # Agent narration is the best dynamic description available.
+                summary = " ".join(t.splitlines()[0].split()).strip("#*` ")
+                if summary:
+                    current_activity = f"@note {summary}"
+            if sid:
+                session_id = sid
+            if tool:
+                current_activity = tool
+        on_tool(current_activity, time.monotonic() - started)
+        if proc.poll() is not None and not events:
+            break
+    stream.close()
     proc.wait()
     rc = proc.returncode
     text = "".join(text_parts).strip()
@@ -217,6 +320,8 @@ def main():
         print("usage: rtide-agent <harness> <provider> <model> <dir>", file=sys.stderr)
         sys.exit(1)
     harness, provider, model, wdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    wdir = os.path.realpath(wdir)
+    os.chdir(wdir)
 
     tweb_dir = os.path.join(wdir, ".tweb")
     os.makedirs(tweb_dir, exist_ok=True)
@@ -249,8 +354,10 @@ def main():
             continue
 
         clear()
-        working_status()
+        working_status(elapsed=0)
         t0 = time.time()
+        marker = render_marker_path()
+        render_before = marker_version(marker)
         try:
             cmd = get_run_cmd(harness, provider, model, req, session_id)
             text, sid, rc = run_harness(cmd, harness, working_status)
@@ -274,7 +381,11 @@ def main():
         conversation.append(("agent", text or f"(no output — exit {rc})"))
         with open(html_path, "w") as f:
             f.write(build_html(conversation, workspace))
-        subprocess.run([TWEB_RENDER, html_path], capture_output=True)
+        # The conversation page is a fallback for concise/plain responses.
+        # If the agent explicitly rendered an artifact during this turn, keep
+        # that artifact visible instead of navigating over it with agent.html.
+        if not artifact_rendered(marker, render_before):
+            subprocess.run([TWEB_RENDER, html_path], capture_output=True)
 
 
 if __name__ == "__main__":

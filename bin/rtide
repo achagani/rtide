@@ -697,11 +697,11 @@ NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
 tmux select-pane -t "$NVIM_PANE" -T nvim
 tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim --listen '$DIR/.rtide/nvim.sock'" Enter
-tmux split-window -v -t "$NVIM_PANE" -l "$agent_lines"
+tmux split-window -v -t "$NVIM_PANE" -l "$agent_lines" -c "$DIR"
 AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
 tmux set-option -p -t "$AGENT_PANE" @rtide-role agent
 tmux select-pane -t "$AGENT_PANE" -T agent
-tmux split-window -h -t "$NVIM_PANE" -p "$nvim_pct"
+tmux split-window -h -t "$NVIM_PANE" -p "$nvim_pct" -c "$DIR"
 TWEB_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')
 tmux set-option -p -t "$TWEB_PANE" @rtide-role tweb
 tmux select-pane -t "$TWEB_PANE" -T tweb
