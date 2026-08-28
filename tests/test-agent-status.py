@@ -127,6 +127,7 @@ class AgentStatusTests(unittest.TestCase):
         }]
         page = AGENT.build_history_html(entries, "demo")
         self.assertIn("Output history", page)
+        self.assertIn("viewer.html?src=", page)
         self.assertIn("result-1.html", page)
         self.assertIn("Compare the options", page)
 
@@ -140,6 +141,11 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn('class="card artifact"', page)
         self.assertIn("1 outputs · 1 artifacts", page)
         self.assertIn("Big Meadows — Field Guide", page)
+
+    def test_viewer_keeps_navigation_outside_artifact(self):
+        self.assertIn('<a class="outputs" href="history.html">Outputs</a>',
+                      AGENT.VIEWER_PAGE)
+        self.assertIn('<iframe id="artifact"', AGENT.VIEWER_PAGE)
 
 
 if __name__ == "__main__":

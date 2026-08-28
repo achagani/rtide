@@ -459,6 +459,12 @@ HISTORY_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><me
 :root{{color-scheme:dark;--bg:#090d14;--panel:#111923;--line:#263449;--text:#edf3ff;--muted:#8495aa;--cyan:#5eead4;--blue:#6db5ff;--violet:#b69cff}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(140deg,#101b2b 0,#090d14 28rem);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}}main{{max-width:1040px;margin:auto;padding:22px 20px 56px}}header{{display:flex;align-items:end;justify-content:space-between;gap:20px;padding:0 2px 14px;border-bottom:1px solid var(--line);margin-bottom:10px}}.eyebrow{{color:var(--cyan);font-size:.66rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}}h1{{font-size:clamp(1.45rem,3vw,2rem);letter-spacing:-.035em;margin:.12rem 0 0}}.counts{{color:var(--muted);font-size:.76rem;white-space:nowrap}}.list{{display:grid}}.card{{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:11px;text-decoration:none;color:inherit;border-bottom:1px solid #202c3d;padding:9px 8px;min-height:58px;transition:.12s background,.12s border-color}}.card:hover{{background:#ffffff08;border-color:#3d5675}}.icon{{display:grid;place-items:center;width:28px;height:28px;border:1px solid #33445b;border-radius:8px;color:var(--blue);background:#101925;font-size:.72rem}}.artifact .icon{{color:var(--violet);border-color:#57477b;background:#19152a}}.copy{{min-width:0}}h2{{font-size:.92rem;line-height:1.25;margin:0;color:#f7f9ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}p{{color:#93a4b9;margin:3px 0 0;font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.side{{text-align:right;min-width:122px}}.meta{{color:var(--muted);font-size:.68rem;white-space:nowrap}}.kind{{display:inline-block;margin-top:3px;color:var(--cyan);font-size:.64rem;font-weight:750;letter-spacing:.055em;text-transform:uppercase}}.artifact .kind{{color:var(--violet)}}.empty{{padding:24px 8px;color:var(--muted)}}@media(max-width:620px){{main{{padding:16px 12px 40px}}header{{align-items:start}}.card{{grid-template-columns:26px minmax(0,1fr);padding:9px 4px}}.side{{grid-column:2;text-align:left;display:flex;gap:8px;align-items:center}}.kind{{margin:0}}}}
 </style></head><body><main><header><div><div class="eyebrow">RTIDE · output archive</div><h1>Output history</h1></div><div class="counts">{count} outputs · {artifact_count} artifacts</div></header><div class="list">{cards}</div></main></body></html>"""
 
+VIEWER_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RTIDE output viewer</title><style>
+:root{{color-scheme:dark}}*{{box-sizing:border-box}}html,body{{height:100%;margin:0;overflow:hidden;background:#080c12}}body{{display:grid;grid-template-rows:42px minmax(0,1fr);font:12px/1 system-ui,sans-serif}}nav{{display:flex;align-items:center;gap:5px;padding:5px 9px;border-bottom:1px solid #273448;background:#0d141eee;color:#dbe7f7}}button,a{{height:30px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;padding:0 10px;background:transparent;color:inherit;text-decoration:none;font:650 12px/1 system-ui,sans-serif;cursor:pointer}}button:hover,a:hover{{background:#ffffff0d;border-color:#ffffff18}}.outputs{{color:#5eead4}}.spacer{{flex:1}}.raw{{color:#91a4ba}}iframe{{display:block;width:100%;height:100%;border:0;background:#090d14}}
+</style></head><body><nav aria-label="RTIDE output navigation"><button id="back" aria-label="Back">←</button><a class="outputs" href="history.html">Outputs</a><button id="forward" aria-label="Forward">→</button><span class="spacer"></span><a class="raw" id="raw" href="#">Open artifact directly ↗</a></nav><iframe id="artifact" title="RTIDE output"></iframe><script>
+const src=new URLSearchParams(location.search).get('src')||'history.html';const frame=document.getElementById('artifact');frame.src=src;document.getElementById('raw').href=src;document.getElementById('back').onclick=()=>history.back();document.getElementById('forward').onclick=()=>history.forward();frame.addEventListener('load',()=>{{try{{document.title=(frame.contentDocument.title||'Output')+' — RTIDE'}}catch(e){{}}}});
+</script></body></html>"""
+
 
 def load_history(path):
     try:
@@ -485,8 +491,15 @@ def build_history_html(entries, workspace):
         is_artifact = kind == "custom artifact"
         card_class = "card artifact" if is_artifact else "card"
         icon = "◆" if is_artifact else "↗"
+        target = entry.get("url", "")
+        parsed = urllib.parse.urlparse(target)
+        if parsed.scheme == "file" and "/.tweb/" in parsed.path:
+            root = target.split("/.tweb/", 1)[0]
+            href = root + "/.tweb/viewer.html?src=" + urllib.parse.quote(target, safe="")
+        else:
+            href = target
         cards.append(
-            f'<a class="{card_class}" href="{H.escape(entry.get("url", ""), quote=True)}">'
+            f'<a class="{card_class}" href="{H.escape(href, quote=True)}">'
             f'<span class="icon" aria-hidden="true">{icon}</span><div class="copy">'
             f'<h2>{H.escape(entry.get("title", "Result"))}</h2>'
             f'<p>{H.escape(summary)}</p></div><div class="side">'
@@ -516,9 +529,12 @@ def main():
     results_dir = os.path.join(tweb_dir, "results")
     os.makedirs(results_dir, exist_ok=True)
     history_path = os.path.join(tweb_dir, "history.html")
+    viewer_path = os.path.join(tweb_dir, "viewer.html")
     legacy_history_path = os.path.join(tweb_dir, "agent.html")
     session_file = os.path.join(wdir, ".rtide", "agent-session")
     history_data_path = os.path.join(wdir, ".rtide", "output-history.json")
+    with open(viewer_path, "w") as f:
+        f.write(VIEWER_PAGE.format())
 
     # resume a previous session for this harness, if any
     session_id = None
