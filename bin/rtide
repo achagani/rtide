@@ -11,7 +11,7 @@
 #   rtide agent      → re-pick provider/harness/model for the current workspace
 #   rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 #   rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
-#   rtide menu       → quick-switcher menu (prefix+M)
+#   rtide menu       → quick-switcher menu (prefix+A)
 #   rtide auth       → check auth for the configured provider
 #   rtide matrix     → print the provider×harness compatibility matrix
 #   rtide setup      → re-run the wizard
@@ -203,6 +203,9 @@ cmd_new() {
 # should consistently return the user to the main editing surface instead.
 resume_session() {
   local sess="$1" pane
+  # RTIDE relies on mouse events for pane focus, border resizing, and tweb.
+  # Re-enable it in case the global prefix+m toggle disabled it at runtime.
+  tmux set-option -g mouse on 2>/dev/null || true
   pane=$(tmux list-panes -s -t "$sess" -F '#{pane_id}' -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
   if [[ -n "$pane" ]]; then
     # The editor may live in a non-current window if the user added windows.
@@ -551,7 +554,7 @@ cmd_refresh() {
   exit 0
 }
 
-# Open the workspace quick-switcher menu (prefix+M). Interactive items run in a
+# Open the workspace quick-switcher menu (prefix+A). Interactive items run in a
 # display-popup so fzf pickers get a tty; the rest run directly via run-shell.
 #   rtide menu [session]   (no arg → current session)
 cmd_menu() {
@@ -672,7 +675,21 @@ AGENT_CMD="rtide-agent $harness $provider $model $DIR"
 
 # Build the layout with pane IDs (index-agnostic — respects base-index settings).
 # Each pane gets a pane-scoped @rtide-role option (survives title changes by apps).
-tmux new-session -d -s "$S" -n work -c "$DIR"
+# Build at the receiving client's real size. Otherwise tmux creates the
+# detached window at 80x24 and proportionally inflates a 3-line agent strip
+# when a larger client attaches.
+START_W=""
+START_H=""
+if [[ -n "${TMUX:-}" ]]; then
+  START_W=$(tmux display-message -p '#{client_width}' 2>/dev/null || true)
+  START_H=$(tmux display-message -p '#{client_height}' 2>/dev/null || true)
+fi
+[[ "$START_W" =~ ^[0-9]+$ ]] || START_W=$(tput cols 2>/dev/null || echo 80)
+[[ "$START_H" =~ ^[0-9]+$ ]] || START_H=$(tput lines 2>/dev/null || echo 24)
+[[ "$START_W" =~ ^[0-9]+$ ]] || START_W=80
+[[ "$START_H" =~ ^[0-9]+$ ]] || START_H=24
+tmux set-option -g mouse on
+tmux new-session -d -x "$START_W" -y "$START_H" -s "$S" -n work -c "$DIR"
 NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
 tmux select-pane -t "$NVIM_PANE" -T nvim
@@ -698,13 +715,39 @@ open(out, "w").write(html)
 PY
 tmux send-keys -t "$TWEB_PANE" "tweb open file://$DIR/.tweb/welcome.html" Enter
 tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
+
+# Readiness barrier: wait for concrete signals from all three surfaces, then
+# make one final geometry/focus pass after asynchronous startup has settled.
+printf 'starting %s…\n' "$S"
+READY_NVIM=0 READY_TWEB=0 READY_AGENT=0
+READY_DEADLINE=$((SECONDS + 15))
+while (( SECONDS < READY_DEADLINE )); do
+  [[ -S "$DIR/.rtide/nvim.sock" ]] && READY_NVIM=1
+  tweb status --pane "$TWEB_PANE" 2>/dev/null \
+    | grep -Fq "file://$DIR/.tweb/welcome.html" && READY_TWEB=1 || true
+  tmux capture-pane -p -t "$AGENT_PANE" -S -10 2>/dev/null \
+    | grep -Fq '● idle' && READY_AGENT=1 || true
+  (( READY_NVIM && READY_TWEB && READY_AGENT )) && break
+  sleep 0.1
+done
+
+# Reassert the exact configured layout at the real client dimensions.
+tmux resize-window -t "$S:work" -x "$START_W" -y "$START_H" 2>/dev/null || true
+tmux resize-pane -t "$AGENT_PANE" -y "$agent_lines"
+TWEB_W=$(( START_W * nvim_pct / 100 ))
+(( TWEB_W < 10 )) && TWEB_W=10
+tmux resize-pane -t "$TWEB_PANE" -x "$TWEB_W"
+if ! (( READY_NVIM && READY_TWEB && READY_AGENT )); then
+  printf 'warning: workspace opened before all surfaces became ready (nvim=%s tweb=%s agent=%s)\n' \
+    "$READY_NVIM" "$READY_TWEB" "$READY_AGENT" >&2
+fi
 # Global bindings that resolve panes by title in the current session at press-time
 bind_if_free t "run-shell 'rtide zoom tweb'"
 bind_if_free a "run-shell 'rtide zoom agent'"
 bind_if_free r "run-shell 'rtide switch'"
 bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
 bind_if_free R "run-shell 'rtide refresh #{session_name}'"
-bind_if_free M "run-shell 'rtide menu #{session_name}'"
+bind_if_free A "run-shell 'rtide menu #{session_name}'"
 tmux select-window -t "$S:work"
 tmux select-pane -t "$NVIM_PANE"
 if [[ -z "${TMUX:-}" ]]; then

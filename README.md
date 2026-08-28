@@ -112,7 +112,7 @@ rtide kill [dir] → alias for quit
 rtide agent      → re-pick provider/harness/model for the current workspace
 rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
-rtide menu       → open the quick-switcher menu for a session (prefix+M)
+rtide menu       → open the quick-switcher menu for a session (prefix+A)
 rtide auth       → check auth for the configured provider
 rtide matrix     → print the provider×harness compatibility matrix
 rtide setup      → re-run the wizard
@@ -127,10 +127,13 @@ prefix+t → zoom tweb      (chat mode)
 prefix+a → zoom agent
 prefix+r → switch workspace
 prefix+R → refresh workspace layout (apply global config to panes)
-prefix+M → quick-switcher menu (switch / change agent / new / refresh / zoom / config / sweep / quit)
+prefix+A → quick-switcher menu (switch / change agent / new / refresh / zoom / config / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)
 ```
+
+Mouse mode is enabled for RTIDE: click a pane to focus it, or drag a pane border
+to resize it.
 
 **Applying settings** — layout settings (`agent_lines`, `nvim_pct`, `shell`) live only in
 `~/.rtide/config`: the single source of truth, read at launch. `rtide refresh` re-reads it
