@@ -48,7 +48,9 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
    (inline CSS, dark theme, no external deps).
 2. Render: `tweb-render .tweb/<slug>.html`
    — this resolves the tweb pane belonging to the current RTIDE workspace.
-3. Dense content: `tweb-render --float .tweb/<slug>.html`.
+3. Keep automatic output in the workspace pane, including dense content. Use
+   `tweb-render .tweb/<slug>.html`; never pass `--float` during an agent turn.
+   Floating is an explicit user-controlled viewing action.
 4. Confirm `tweb-render` succeeds. Do not merely say an artifact was produced.
    Never run `tweb split`, `tweb open`, or restart the tweb daemon inside RTIDE;
    those commands can create a duplicate browser pane. Always use `tweb-render`.

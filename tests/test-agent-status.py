@@ -118,9 +118,15 @@ class AgentStatusTests(unittest.TestCase):
             before = AGENT.marker_version(request)
             with open(request, "w") as f:
                 f.write("0\nfile:///workspace/.tweb/research.html\n")
-            with mock.patch.object(AGENT, "show_and_verify", return_value=True) as show:
+            with mock.patch.object(AGENT, "show_and_verify", return_value=True) as show, \
+                    mock.patch.object(AGENT, "managed_tweb_pane", return_value="%9"), \
+                    mock.patch.object(AGENT.subprocess, "run") as run:
                 after = AGENT.fulfill_render_request(request, before)
             show.assert_called_once_with("file:///workspace/.tweb/research.html")
+            run.assert_called_once_with(
+                ["tweb", "pin", "--pane", "%9"],
+                stdout=AGENT.subprocess.DEVNULL, stderr=AGENT.subprocess.DEVNULL,
+            )
             self.assertEqual(after, AGENT.marker_version(request))
 
     def test_custom_artifact_uses_its_authored_title(self):
