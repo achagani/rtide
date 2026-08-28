@@ -77,6 +77,16 @@ class AgentStatusTests(unittest.TestCase):
         self.assertNotIn('class="msg', page)
         self.assertNotIn("scrollTo", page)
 
+    def test_prose_opening_is_not_promoted_to_hero_title(self):
+        opening = "This opening sentence explains the answer and belongs in the body."
+        page = AGENT.build_result_html(
+            "Explain the behavior", opening + "\n\nMore detail follows.", "demo", 2
+        )
+        self.assertIn("<h1>Explain the behavior</h1>", page)
+        self.assertNotIn(f"<h1>{opening}</h1>", page)
+        self.assertEqual(page.count(opening), 1)
+        self.assertIn("<summary>Request context</summary>", page)
+
     def test_history_links_to_individual_results(self):
         entries = [{
             "request": "Compare the options", "title": "Recommendation",
