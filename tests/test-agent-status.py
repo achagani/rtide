@@ -23,8 +23,12 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 class AgentStatusTests(unittest.TestCase):
     def test_clear_erases_visible_screen_and_scrollback(self):
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            AGENT.clear()
+        with mock.patch.object(AGENT.subprocess, "run") as run:
+            with mock.patch.dict(os.environ, {"TMUX_PANE": "%9"}):
+                with contextlib.redirect_stdout(out):
+                    AGENT.clear()
+        run.assert_called_once()
+        self.assertIn("clear-history", run.call_args.args[0])
         self.assertEqual(out.getvalue(), "\033[3J\033[2J\033[H")
 
     def test_agent_narration_is_not_relabelled(self):

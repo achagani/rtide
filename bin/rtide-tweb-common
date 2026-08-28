@@ -47,6 +47,13 @@ rtide_tweb_show() {
       printf 'tweb output error: navigation failed for pane %s\n' "$RTIDE_TWEB_PANE" >&2
       return 1
     }
+    # One notch below the browser's default content size. Keep this as a page
+    # scale because tweb intentionally owns its Chromium/device zoom factor.
+    local page_zoom="${RTIDE_TWEB_ZOOM:-0.9}"
+    if [[ "$page_zoom" =~ ^(0\.[1-9][0-9]*|1(\.0+)?)$ ]]; then
+      tweb eval --pane "$RTIDE_TWEB_PANE" \
+        "document.documentElement.style.zoom='$page_zoom'; true" >/dev/null || true
+    fi
     mkdir -p "$(dirname "$RTIDE_TWEB_LAST_RENDER")"
     printf '%s\n' "$url" > "$RTIDE_TWEB_LAST_RENDER"
     if [[ "$float" == 1 ]]; then

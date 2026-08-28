@@ -138,6 +138,8 @@ to resize it.
 **Applying settings** — layout settings (`agent_lines`, `nvim_pct`, `shell`) live only in
 `~/.rtide/config`: the single source of truth, read at launch. `rtide refresh` re-reads it
 and applies it to a **running** workspace — no relaunch, nothing materialized per-workspace.
+RTIDE also reapplies these dimensions automatically when the terminal is maximized,
+restored, or otherwise resized.
 
 | You want to… | Do this |
 |---|---|
@@ -196,7 +198,8 @@ The helpers resolve the current tmux session's pane tagged `@rtide-role=tweb`, s
 multiple workspaces cannot steal each other's output. They fail clearly if that pane
 is missing or duplicated instead of starting a blocking browser in the caller's pane.
 Generated command and pipe reports are HTML-escaped and stored under a per-session
-cache directory in `~/.cache/rtide/`.
+cache directory in `~/.cache/rtide/`. Managed pages render one content-size notch
+below the browser default (`RTIDE_TWEB_ZOOM=0.9`, overridable in the environment).
 
 Use `rtide-open <file>` to open a file in the workspace's nvim pane. It finds the
 workspace root (nearest `.rtide/` dir) and talks to nvim over its `--listen` socket

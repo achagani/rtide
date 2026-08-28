@@ -35,6 +35,12 @@ RESET = "\033[0m"
 def clear():
     # Erase the visible pane and its tmux scrollback so a submitted request
     # does not remain above the fresh prompt after the turn completes.
+    pane = os.environ.get("TMUX_PANE", "")
+    if pane:
+        subprocess.run(
+            ["tmux", "clear-history", "-t", pane],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
     sys.stdout.write("\033[3J\033[2J\033[H")
     sys.stdout.flush()
 

@@ -198,6 +198,15 @@ cmd_new() {
   exec "$0" "$ndir"
 }
 
+install_session_hooks() {
+  local sess="$1" quoted
+  printf -v quoted '%q' "$sess"
+  # Terminal maximize/restore changes the tmux window size proportionally.
+  # Reapply RTIDE's exact strip height and column split after each client resize.
+  tmux set-hook -t "$sess" client-resized \
+    "run-shell 'rtide refresh $quoted >/dev/null 2>&1'" 2>/dev/null || true
+}
+
 # Resume a workspace on its editor pane. tmux remembers the last active pane
 # per session, which is often the agent input strip; selecting the workspace
 # should consistently return the user to the main editing surface instead.
@@ -206,6 +215,7 @@ resume_session() {
   # RTIDE relies on mouse events for pane focus, border resizing, and tweb.
   # Re-enable it in case the global prefix+m toggle disabled it at runtime.
   tmux set-option -g mouse on 2>/dev/null || true
+  install_session_hooks "$sess"
   pane=$(tmux list-panes -s -t "$sess" -F '#{pane_id}' -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
   if [[ -n "$pane" ]]; then
     # The editor may live in a non-current window if the user added windows.
@@ -734,6 +744,11 @@ while (( SECONDS < READY_DEADLINE )); do
   sleep 0.1
 done
 
+# Match subsequent tweb-render navigations: one content-size notch below the
+# browser default while leaving tweb's device/pixel scaling untouched.
+tweb eval --pane "$TWEB_PANE" \
+  "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; true" >/dev/null 2>&1 || true
+
 # Reassert the exact configured layout at the real client dimensions.
 tmux resize-window -t "$S:work" -x "$START_W" -y "$START_H" 2>/dev/null || true
 tmux resize-pane -t "$AGENT_PANE" -y "$agent_lines"
@@ -751,6 +766,7 @@ bind_if_free r "run-shell 'rtide switch'"
 bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
 bind_if_free R "run-shell 'rtide refresh #{session_name}'"
 bind_if_free A "run-shell 'rtide menu #{session_name}'"
+install_session_hooks "$S"
 tmux select-window -t "$S:work"
 # A new workspace opens ready for the user's first request. Existing workspace
 # resumes still return to the editor via resume_session().
