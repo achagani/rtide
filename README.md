@@ -41,6 +41,7 @@ the queue count (`/help` prints this reminder in the prompt).
   status; the harness runs non-interactively per request (`claude -p` / `codex exec` /
   `hermes chat -q` / `opencode run`). Every turn opens as its own designed tweb
   result; a separate visual history index links all prior results and custom artifacts
+  through a persistent viewer with clickable position dots and Left/Right arrow navigation.
 - **Files in the editor** — files the agent creates or edits open in the nvim pane
   via `rtide-open <path>` (a convention the agent follows)
 - **Agent-independent memory** — one store every agent reads and writes through the
