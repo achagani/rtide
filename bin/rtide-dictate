@@ -41,7 +41,7 @@ if importlib.util.find_spec("faster_whisper") is None:
     # realpath() makes both executables look identical. Compare their invoked
     # paths instead or the bootstrap falsely assumes it is already in the venv.
     if os.path.abspath(sys.executable) != os.path.abspath(env_python):
-        print("◌ preparing the local speech engine (first use only)…")
+        print("◌ Preparing speech engine…")
         if not os.path.exists(env_python):
             subprocess.run([sys.executable, "-m", "venv", env_dir], check=True)
         subprocess.run([env_python, "-m", "pip", "install", "-q",
@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix="rtide-dictate-") as tmp:
         cmd = [recorder, "--rate", "16000", "--channels", "1", audio]
     else:
         cmd = [recorder, "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", audio]
-    print("● listening — speak now; press Enter to stop")
+    print("● Listening — speak; Enter stops")
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             start_new_session=True)
     try:
@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix="rtide-dictate-") as tmp:
                   if proc.stderr else "")
         fail(detail or "no microphone audio was captured")
 
-    print("◌ transcribing locally…")
+    print("◌ Transcribing locally…")
     from faster_whisper import WhisperModel
     model = WhisperModel(os.environ.get("RTIDE_WHISPER_MODEL", "base.en"),
                          device="cpu", compute_type="int8")
