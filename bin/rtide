@@ -203,8 +203,12 @@ cmd_new() {
 # should consistently return the user to the main editing surface instead.
 resume_session() {
   local sess="$1" pane
-  pane=$(tmux list-panes -t "$sess" -F '#{pane_id}' -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
-  [[ -n "$pane" ]] && tmux select-pane -t "$pane" 2>/dev/null || true
+  pane=$(tmux list-panes -s -t "$sess" -F '#{pane_id}' -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
+  if [[ -n "$pane" ]]; then
+    # The editor may live in a non-current window if the user added windows.
+    tmux select-window -t "$pane" 2>/dev/null || true
+    tmux select-pane -t "$pane" 2>/dev/null || true
+  fi
   if [[ -n "${TMUX:-}" ]]; then
     tmux switch-client -t "$sess"
   else
@@ -628,9 +632,8 @@ mkdir -p "$DIR/.rtide/memory"
 
 S="rtide-$(basename "$DIR")"
 if tmux has-session -t "$S" 2>/dev/null; then
-  tmux switch-client -t "$S" 2>/dev/null \
-    || tmux attach -t "$S" 2>/dev/null \
-    || echo "workspace $S is running — attach with: tmux attach -t $S"
+  resume_session "$S" \
+    || echo "could not open $S — attach with: tmux attach -t $S" >&2
   exit 0
 fi
 
