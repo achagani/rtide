@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
 PROVIDER_BIN = os.path.join(SELF_DIR, "rtide-provider")
@@ -79,6 +80,35 @@ def marker_target(path):
             return f.read().strip() or None
     except (OSError, TypeError):
         return None
+
+
+def artifact_title(target):
+    """Read a local custom artifact's authored document title."""
+    try:
+        parsed = urllib.parse.urlparse(target)
+        if parsed.scheme != "file":
+            return None
+        path = urllib.parse.unquote(parsed.path)
+        with open(path, encoding="utf-8") as f:
+            head = f.read(262144)
+        match = re.search(r"<title[^>]*>(.*?)</title>", head,
+                          flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return None
+        title = re.sub(r"<[^>]+>", "", H.unescape(match.group(1)))
+        return " ".join(title.split())[:120] or None
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def refresh_artifact_titles(entries):
+    """Repair legacy custom-history labels from each artifact's own title."""
+    for entry in entries:
+        if entry.get("kind") == "custom artifact":
+            title = artifact_title(entry.get("url", ""))
+            if title:
+                entry["title"] = title
+    return entries
 
 
 def managed_tweb_pane():
@@ -488,7 +518,7 @@ def main():
             session_id = saved.split(":", 1)[1]
 
     workspace = os.path.basename(wdir)
-    history = load_history(history_data_path)
+    history = refresh_artifact_titles(load_history(history_data_path))
     # One-time migration from the former chat transcript. Preserve it as a
     # browsable historical artifact before agent.html becomes the new index.
     if not history and os.path.exists(legacy_history_path):
@@ -561,7 +591,8 @@ def main():
 
         entry = {
             "request": req,
-            "title": result_title(response, req),
+            "title": (artifact_title(target) if custom else None)
+                     or result_title(response, req),
             "url": target,
             "elapsed": dt,
             "created": datetime.datetime.now().strftime("%b %d, %Y · %H:%M"),

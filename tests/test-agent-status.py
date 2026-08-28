@@ -66,6 +66,21 @@ class AgentStatusTests(unittest.TestCase):
                 f.write("file:///workspace/.tweb/research.html\n")
             self.assertTrue(AGENT.artifact_rendered(marker, before))
 
+    def test_custom_artifact_uses_its_authored_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            page = os.path.join(tmp, "field-guide.html")
+            with open(page, "w") as f:
+                f.write("<html><head><title>Big Meadows — Deep Trip Briefing</title>"
+                        "</head><body></body></html>")
+            self.assertEqual(
+                AGENT.artifact_title("file://" + page),
+                "Big Meadows — Deep Trip Briefing",
+            )
+            entries = [{"kind": "custom artifact", "title": "old request",
+                        "url": "file://" + page}]
+            AGENT.refresh_artifact_titles(entries)
+            self.assertEqual(entries[0]["title"], "Big Meadows — Deep Trip Briefing")
+
     def test_fallback_is_a_standalone_designed_result(self):
         page = AGENT.build_result_html(
             "Compare the options", "# Recommendation\n\n- Fast\n- Clear", "demo", 4.2

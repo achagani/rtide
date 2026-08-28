@@ -6,8 +6,8 @@ channeled through **tweb** as graphically rich HTML.
 
 ```
 ┌──────────────┬──────────────┐
-│  nvim (0)    │  tweb (2)    │
-│  ~50%        │  ~50%        │
+│ nvim (0)  │     tweb (2)     │
+│   ~40%    │       ~60%       │
 ├──────────────┴──────────────┤
 │  agent (1) — ~30% strip     │
 └─────────────────────────────┘
@@ -114,6 +114,7 @@ rtide kill [dir] → alias for quit
 rtide agent      → re-pick provider/harness/model for the current workspace
 rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
+rtide nvim [toggle|hide|show] [session] → collapse or restore the editor pane
 rtide menu       → open the quick-switcher menu for a session (prefix+A)
 rtide history    → open the current workspace's browsable output history
 rtide auth       → check auth for the configured provider
@@ -130,7 +131,8 @@ prefix+t → zoom tweb      (result view)
 prefix+a → zoom agent
 prefix+r → switch workspace
 prefix+R → refresh workspace layout (apply global config to panes)
-prefix+A → actions menu (switch / agent / new / refresh / zoom / config / output history / sweep / quit)
+prefix+e → hide/show the nvim editor while keeping tweb and the prompt visible
+prefix+A → actions menu (switch / agent / new / refresh / hide editor / zoom / config / output history / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)
 ```
@@ -138,7 +140,7 @@ prefix+z → zoom any pane  (tmux default)
 Mouse mode is enabled for RTIDE: click a pane to focus it, or drag a pane border
 to resize it.
 
-**Applying settings** — layout settings (`agent_lines`, `nvim_pct`, `shell`) live only in
+**Applying settings** — layout settings (`agent_lines`, `tweb_pct`, `shell`) live only in
 `~/.rtide/config`: the single source of truth, read at launch. `rtide refresh` re-reads it
 and applies it to a **running** workspace — no relaunch, nothing materialized per-workspace.
 RTIDE also reapplies these dimensions automatically when the terminal is maximized,
@@ -147,6 +149,7 @@ restored, or otherwise resized.
 | You want to… | Do this |
 |---|---|
 | Refresh current workspace's layout | `prefix+R` — any pane in the workspace |
+| Hide/show the editor | `prefix+e` or Actions → Hide/show editor |
 | From a shell inside the workspace | `rtide refresh` (resolves the current session) |
 | From outside tmux | `rtide refresh <dir-or-session>` |
 | View / change / reset settings | `rtide config` · `rtide config set key=value` · `rtide config reset` |

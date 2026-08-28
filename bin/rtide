@@ -11,6 +11,7 @@
 #   rtide agent      → re-pick provider/harness/model for the current workspace
 #   rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 #   rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
+#   rtide nvim       → hide/show the editor pane while keeping tweb + prompt visible
 #   rtide menu       → quick-switcher menu (prefix+A)
 #   rtide history    → open the current workspace's output history
 #   rtide auth       → check auth for the configured provider
@@ -133,8 +134,8 @@ setup_wizard() {
   read -rp "Default directory (empty = current dir): " default_dir
   read -rp "Agent strip lines [3]: " agent_lines
   agent_lines="${agent_lines:-3}"
-  read -rp "nvim width % [50]: " nvim_pct
-  nvim_pct="${nvim_pct:-50}"
+  read -rp "tweb width % [60]: " tweb_pct
+  tweb_pct="${tweb_pct:-60}"
   local shells=()
   for s in fish zsh nushell bash; do
     command -v "$s" >/dev/null 2>&1 && shells+=("$s")
@@ -155,7 +156,7 @@ harness=$HARNESS
 model=$MODEL
 default_dir=$default_dir
 agent_lines=$agent_lines
-nvim_pct=$nvim_pct
+tweb_pct=$tweb_pct
 shell=$shell
 auto_float=$auto_float
 EOF
@@ -458,7 +459,7 @@ cmd_auth() {
 
 # --- config & refresh -------------------------------------------------------
 
-CONFIG_KEYS="provider harness model default_dir agent_lines nvim_pct shell auto_float"
+CONFIG_KEYS="provider harness model default_dir agent_lines tweb_pct shell auto_float"
 
 # Rewrite ~/.rtide/config from the current shell vars (only known keys).
 write_global_config() {
@@ -479,13 +480,14 @@ write_global_config() {
 cmd_config() {
   local sub="${2:-}" key val scope def
   [[ -f "$CONFIG" ]] && source "$CONFIG"
+  tweb_pct="${tweb_pct:-${nvim_pct:-60}}"
   case "$sub" in
     "")
       printf 'agent  %-12s %s\n' provider "$provider"
       printf 'agent  %-12s %s\n' harness "$harness"
       printf 'agent  %-12s %s\n' model "$model"
       printf 'layout %-12s %s\n' agent_lines "${agent_lines:-3}"
-      printf 'layout %-12s %s\n' nvim_pct "${nvim_pct:-50}"
+      printf 'layout %-12s %s\n' tweb_pct "$tweb_pct"
       printf 'layout %-12s %s\n' shell "$shell"
       printf 'layout %-12s %s\n' auto_float "$auto_float"
       printf 'misc   %-12s %s\n' default_dir "$default_dir"
@@ -501,9 +503,9 @@ cmd_config() {
           agent_lines)
             [[ "$val" =~ ^[0-9]+$ ]] && (( val >= 1 )) \
               || { echo "config error: agent_lines must be a positive integer" >&2; exit 1; } ;;
-          nvim_pct)
+          tweb_pct)
             [[ "$val" =~ ^[0-9]+$ ]] && (( val >= 1 && val <= 99 )) \
-              || { echo "config error: nvim_pct must be an integer 1-99" >&2; exit 1; } ;;
+              || { echo "config error: tweb_pct must be an integer 1-99" >&2; exit 1; } ;;
           auto_float)
             [[ "$val" =~ ^(true|false)$ ]] \
               || { echo "config error: auto_float must be true or false" >&2; exit 1; } ;;
@@ -519,9 +521,9 @@ cmd_config() {
       def=fish
       command -v fish >/dev/null 2>&1 || def=zsh
       case "$scope" in
-        layout) agent_lines=3; nvim_pct=50; auto_float=false; shell="$def" ;;
+        layout) agent_lines=3; tweb_pct=60; auto_float=false; shell="$def" ;;
         agent)  provider=""; harness=""; model="" ;;
-        all)    provider=""; harness=""; model=""; agent_lines=3; nvim_pct=50; auto_float=false; shell="$def" ;;
+        all)    provider=""; harness=""; model=""; agent_lines=3; tweb_pct=60; auto_float=false; shell="$def" ;;
         *) echo "usage: rtide config reset [layout|agent|all]" >&2; exit 1 ;;
       esac
       write_global_config
@@ -538,7 +540,7 @@ cmd_config() {
 # Apply the current global config's layout to a running workspace's panes.
 #   rtide refresh [session|dir]   (no arg → current session; prefix+R passes #{session_name})
 cmd_refresh() {
-  local arg="${2:-}" sess agent tweb workspace w tw changed=""
+  local arg="${2:-}" sess agent nvim tweb workspace w tw hidden changed=""
   if [[ -n "$arg" ]]; then
     # A session name wins; anything else is a directory (basename may itself be rtide-*).
     if tmux has-session -t "$arg" 2>/dev/null; then
@@ -556,7 +558,7 @@ cmd_refresh() {
 
   [[ -f "$CONFIG" ]] && source "$CONFIG"
   agent_lines="${agent_lines:-3}"
-  nvim_pct="${nvim_pct:-50}"
+  tweb_pct="${tweb_pct:-${nvim_pct:-60}}"
 
   # Refresh always restores client-relative sizing. This also repairs older
   # sessions created while RTIDE left their tmux window in manual-size mode.
@@ -568,6 +570,7 @@ cmd_refresh() {
   fi
 
   agent=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="agent"{print $1; exit}')
+  nvim=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="nvim"{print $1; exit}')
   tweb=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="tweb"{print $1; exit}')
   if [[ -n "$tweb" ]]; then
     workspace=$(tmux display-message -p -t "$tweb" '#{pane_current_path}' 2>/dev/null || true)
@@ -576,19 +579,41 @@ cmd_refresh() {
     fi
   fi
   w=$(tmux display-message -p -t "$sess:work" '#{window_width}' 2>/dev/null || echo 80)
-  tw=$(( w * nvim_pct / 100 )); (( tw < 10 )) && tw=10
+  tw=$(( w * tweb_pct / 100 )); (( tw < 10 )) && tw=10
+  hidden=$(tmux show-options -v -t "$sess" @rtide-nvim-hidden 2>/dev/null || true)
 
   if [[ -n "$agent" ]]; then
     tmux resize-pane -t "$agent" -y "$agent_lines"
     changed="strip→${agent_lines}L"
   fi
-  if [[ -n "$tweb" ]]; then
+  if [[ "$hidden" == 1 && -n "$nvim" ]]; then
+    tmux resize-pane -t "$nvim" -x 1
+    changed="${changed:+$changed, }nvim→hidden"
+  elif [[ -n "$tweb" ]]; then
     tmux resize-pane -t "$tweb" -x "$tw"
-    changed="${changed:+$changed, }tweb→${nvim_pct}%"
+    changed="${changed:+$changed, }tweb→${tweb_pct}%"
   fi
   [[ -n "$changed" ]] || { echo "refresh: no panes to resize in $sess" >&2; exit 1; }
   echo "refresh: $sess — $changed"
   exit 0
+}
+
+# Hide/show nvim without zooming away the prompt strip. tmux panes cannot have
+# zero width, so hidden mode collapses the editor to its one-column minimum.
+cmd_nvim() {
+  local action="${2:-toggle}" sess="${3:-}" hidden
+  [[ -n "$sess" ]] || sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+  [[ -n "$sess" ]] && tmux has-session -t "$sess" 2>/dev/null \
+    || { echo "nvim: no workspace session" >&2; exit 1; }
+  hidden=$(tmux show-options -v -t "$sess" @rtide-nvim-hidden 2>/dev/null || true)
+  case "$action" in
+    toggle) [[ "$hidden" == 1 ]] && hidden=0 || hidden=1 ;;
+    hide) hidden=1 ;;
+    show) hidden=0 ;;
+    *) echo "usage: rtide nvim [toggle|hide|show] [session]" >&2; exit 1 ;;
+  esac
+  tmux set-option -t "$sess" @rtide-nvim-hidden "$hidden"
+  cmd_refresh refresh "$sess"
 }
 
 # Open the workspace quick-switcher menu (prefix+A). Interactive items run in a
@@ -606,6 +631,7 @@ cmd_menu() {
     "New workspace…"   n "display-popup -E -w 80% -h 70% 'rtide new'" \
     "" \
     "Refresh layout"   R "run-shell 'rtide refresh ${sess}'" \
+    "Hide/show editor" e "run-shell 'rtide nvim toggle ${sess}'" \
     "Zoom tweb"        t "run-shell 'rtide zoom tweb'" \
     "Zoom agent"       a "run-shell 'rtide zoom agent'" \
     "Config…"          c "display-popup -E -w 70% -h 50% 'sh -c \"rtide config; echo; read -p done\"'" \
@@ -656,6 +682,7 @@ case "${1:-}" in
   auth)   cmd_auth "$@" ;;
   config) cmd_config "$@" ;;
   refresh) cmd_refresh "$@" ;;
+  nvim)   cmd_nvim "$@" ;;
   menu)   cmd_menu "$@" ;;
   history) cmd_history "$@" ;;
   matrix) "$PROVIDER_BIN" matrix; exit 0 ;;
@@ -668,6 +695,7 @@ source "$CONFIG"
 # legacy: agent= → harness=
 harness="${harness:-${agent:-}}"
 agent_lines="${agent_lines:-3}"   # agent strip height in lines — minimal input box (status + prompt)
+tweb_pct="${tweb_pct:-${nvim_pct:-60}}" # legacy nvim_pct actually controlled tweb width
 
 # Bare `rtide` → pick an active workspace to resume, or start a new one.
 if [[ -z "${1:-}" ]]; then
@@ -756,7 +784,7 @@ tmux split-window -v -t "$NVIM_PANE" -l "$agent_lines" -c "$DIR"
 AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
 tmux set-option -p -t "$AGENT_PANE" @rtide-role agent
 tmux select-pane -t "$AGENT_PANE" -T agent
-tmux split-window -h -t "$NVIM_PANE" -p "$nvim_pct" -c "$DIR"
+tmux split-window -h -t "$NVIM_PANE" -p "$tweb_pct" -c "$DIR"
 TWEB_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')
 tmux set-option -p -t "$TWEB_PANE" @rtide-role tweb
 tmux select-pane -t "$TWEB_PANE" -T tweb
@@ -799,7 +827,7 @@ tweb eval --pane "$TWEB_PANE" \
 # Reassert the exact configured layout at the real client dimensions.
 tmux resize-window -t "$S:work" -x "$START_W" -y "$START_H" 2>/dev/null || true
 tmux resize-pane -t "$AGENT_PANE" -y "$agent_lines"
-TWEB_W=$(( START_W * nvim_pct / 100 ))
+TWEB_W=$(( START_W * tweb_pct / 100 ))
 (( TWEB_W < 10 )) && TWEB_W=10
 tmux resize-pane -t "$TWEB_PANE" -x "$TWEB_W"
 if ! (( READY_NVIM && READY_TWEB && READY_AGENT )); then
@@ -813,6 +841,7 @@ bind_if_free r "run-shell 'rtide switch'"
 bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
 bind_if_free R "run-shell 'rtide refresh #{session_name}'"
 bind_if_free A "run-shell 'rtide menu #{session_name}'"
+bind_if_free e "run-shell 'rtide nvim toggle #{session_name}'"
 install_session_hooks "$S"
 tmux select-window -t "$S:work"
 # A new workspace opens ready for the user's first request. Existing workspace
