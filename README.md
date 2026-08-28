@@ -24,6 +24,9 @@ Use `/steer <message>` to interrupt and resume the same session with new directi
 `/interrupt` to stop, `/resend` to repeat the last message, and `/queue` to inspect
 the queue count (`/help` prints this reminder in the prompt). Pressing `/` on an
 empty prompt opens a selectable command overlay; use Up/Down, Enter, or Escape.
+The prompt is a full line editor: Left/Right, Home/End, Ctrl+Left/Ctrl+Right,
+and insertion in the middle all work. Press `prefix+v` to dictate locally;
+speak, press Enter to stop, and the transcript is inserted at the cursor.
 
 ## What you get
 
@@ -142,6 +145,7 @@ prefix+a → zoom agent
 prefix+r → switch workspace
 prefix+R → refresh workspace layout (apply global config to panes)
 prefix+e → hide/show the nvim editor while keeping tweb and the prompt visible
+prefix+v → dictate into the prompt (press Enter to stop recording)
 prefix+A → actions menu (switch / agent / new / refresh / reset layout / hide editor / zoom / config / output history / sweep / quit)
 prefix+Q → quit workspace (asks y/n, sweeps memories first)
 prefix+z → zoom any pane  (tmux default)

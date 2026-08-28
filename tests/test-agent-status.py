@@ -62,7 +62,11 @@ class AgentStatusTests(unittest.TestCase):
             AGENT.working_status("@note researching", 2, 0, reset_prompt=True)
         plain = ANSI.sub("", out.getvalue())
         self.assertIn("working 2s", plain)
-        self.assertTrue(plain.endswith("\n> "))
+        self.assertTrue(plain.endswith("\n╰─❯ "))
+
+    def test_prompt_uses_readline_line_editor(self):
+        self.assertIn("╰─❯", AGENT.PROMPT)
+        self.assertTrue(callable(AGENT.readline.redisplay))
 
     def test_live_input_controls(self):
         self.assertEqual(AGENT.classify_live_input("follow up"),
@@ -165,10 +169,22 @@ class AgentStatusTests(unittest.TestCase):
         }]
         page = AGENT.build_history_html(entries, "demo")
         self.assertIn('class="card artifact"', page)
-        self.assertIn('data-filter="artifact"', page)
+        self.assertIn('href="history-artifacts.html"', page)
         self.assertIn('data-kind="artifact"', page)
-        self.assertIn("1 outputs · 1 artifacts", page)
+        self.assertIn("1 shown · 1 total", page)
         self.assertIn("Big Meadows — Field Guide", page)
+
+    def test_history_filters_are_script_free_pages(self):
+        entries = [
+            {"request": "A", "title": "Artifact", "url": "file:///w/.tweb/a.html",
+             "elapsed": 1, "created": "now", "kind": "custom artifact"},
+            {"request": "R", "title": "Response", "url": "file:///w/.tweb/r.html",
+             "elapsed": 1, "created": "now", "kind": "designed result"},
+        ]
+        page = AGENT.build_history_html(entries, "demo", "artifact")
+        self.assertIn("Artifact", page)
+        self.assertNotIn(">Response</h2>", page)
+        self.assertNotIn("<script>", page)
 
     def test_viewer_keeps_navigation_outside_artifact(self):
         viewer = AGENT.build_viewer_html([

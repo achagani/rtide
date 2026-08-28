@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Record local speech, transcribe it locally, and paste into an RTIDE pane."""
+import os
+import importlib.util
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+def fail(message):
+    print(f"dictation: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+pane = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TMUX_PANE", "")
+if not pane:
+    fail("no target prompt pane")
+# The shortcut works from every RTIDE pane, but speech always belongs in the
+# session's prompt pane.
+role = subprocess.run(["tmux", "display-message", "-p", "-t", pane,
+                       "#{@rtide-role}"], capture_output=True, text=True)
+if role.stdout.strip() != "agent":
+    session = subprocess.run(["tmux", "display-message", "-p", "-t", pane,
+                              "#{session_name}"], capture_output=True, text=True)
+    panes = subprocess.run(["tmux", "list-panes", "-t", session.stdout.strip(),
+                            "-F", "#{pane_id} #{@rtide-role}"],
+                           capture_output=True, text=True)
+    pane = next((line.split()[0] for line in panes.stdout.splitlines()
+                 if line.split()[1:] == ["agent"]), "")
+    if not pane:
+        fail("this session has no RTIDE prompt pane")
+
+# Keep speech dependencies isolated from the system Python. The first shortcut
+# use prepares this environment before recording, so captured audio is never
+# discarded by a setup/re-exec cycle.
+if importlib.util.find_spec("faster_whisper") is None:
+    env_dir = os.path.expanduser("~/.rtide/speech-env")
+    env_python = os.path.join(env_dir, "bin", "python")
+    if os.path.realpath(sys.executable) != os.path.realpath(env_python):
+        print("◌ preparing the local speech engine (first use only)…")
+        if not os.path.exists(env_python):
+            subprocess.run([sys.executable, "-m", "venv", env_dir], check=True)
+        subprocess.run([env_python, "-m", "pip", "install", "-q",
+                        "faster-whisper"], check=True)
+        os.execv(env_python, [env_python, os.path.realpath(__file__), pane])
+    fail("could not load the local speech engine")
+recorder = shutil.which("pw-record") or shutil.which("arecord")
+if not recorder:
+    fail("pw-record or arecord is required")
+
+with tempfile.TemporaryDirectory(prefix="rtide-dictate-") as tmp:
+    audio = os.path.join(tmp, "speech.wav")
+    if os.path.basename(recorder) == "pw-record":
+        cmd = [recorder, "--rate", "16000", "--channels", "1", audio]
+    else:
+        cmd = [recorder, "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", audio]
+    print("● listening — speak now; press Enter to stop")
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                            start_new_session=True)
+    try:
+        input()
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    if not os.path.exists(audio) or os.path.getsize(audio) < 1024:
+        detail = (proc.stderr.read().decode(errors="replace").strip()
+                  if proc.stderr else "")
+        fail(detail or "no microphone audio was captured")
+
+    print("◌ transcribing locally…")
+    from faster_whisper import WhisperModel
+    model = WhisperModel(os.environ.get("RTIDE_WHISPER_MODEL", "base.en"),
+                         device="cpu", compute_type="int8")
+    segments, _ = model.transcribe(audio, beam_size=5, vad_filter=True)
+    text = " ".join(segment.text.strip() for segment in segments).strip()
+    if not text:
+        fail("no speech recognized")
+    subprocess.run(["tmux", "set-buffer", "--", text], check=True)
+    subprocess.run(["tmux", "paste-buffer", "-t", pane], check=True)
+    print(f"✓ inserted {len(text.split())} words")

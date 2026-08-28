@@ -13,6 +13,7 @@ import datetime
 import json
 import os
 import re
+import readline
 import selectors
 import signal
 import shutil
@@ -33,6 +34,14 @@ BLUE = "\033[34m"
 MAGENTA = "\033[35m"
 DIM = "\033[2m"
 RESET = "\033[0m"
+PROMPT = f"\001{CYAN}\002╰─❯\001{RESET}\002 "
+PROMPT_PLAIN = "╰─❯ "
+
+# Turn input() into a real line editor: cursor movement, word movement, and
+# insertion at the cursor instead of an append/backspace-only cooked line.
+readline.parse_and_bind("set editing-mode emacs")
+readline.parse_and_bind('"\\e[1;5D": backward-word')
+readline.parse_and_bind('"\\e[1;5C": forward-word')
 
 
 def clear():
@@ -167,7 +176,8 @@ def status(msg):
 
 
 def idle_status():
-    status(f"{GREEN}●{RESET} idle — type a request (Ctrl-d to quit)")
+    status(f"{DIM}╭─{RESET} {MAGENTA}RTIDE{RESET}  {GREEN}● ready{RESET}"
+           f" {DIM}· type, edit, or prefix+v to speak{RESET}")
 
 
 def activity(event=None):
@@ -205,7 +215,7 @@ def working_status(tool=None, elapsed=0, queued=0, reset_prompt=False):
     if reset_prompt:
         # Keep a discoverable input line beneath the live status. This also
         # clears a submitted queue/steer command before drawing the next prompt.
-        sys.stdout.write(f"\033[2J\033[H{line}\n> ")
+        sys.stdout.write(f"\033[2J\033[H{line}\n{PROMPT_PLAIN}")
     else:
         # Update the status one row above without moving the user's typing cursor.
         sys.stdout.write(f"\0337\r\033[1A\033[2K{line}\0338")
@@ -534,18 +544,30 @@ def build_result_html(request, response, workspace, elapsed):
     # If an explicit heading supplied the title, do not repeat it at the top
     # of the body immediately below the compact header.
     body_source = re.sub(r"^\s*#{1,3}\s+.+(?:\n|$)", "", response, count=1)
-    return RESULT_PAGE.format(
+    page = RESULT_PAGE.format(
         title=H.escape(authored_title or "Result"),
         title_block=(f"<h1>{H.escape(authored_title)}</h1>" if authored_title else ""),
         workspace=H.escape(workspace),
         elapsed=f"{elapsed:.0f}", date=datetime.datetime.now().strftime("%b %d, %Y · %H:%M"),
         request=H.escape(request), body=md_to_html(body_source),
     )
+    print_css = ("<style>@media print{*{-webkit-print-color-adjust:exact!important;"
+                 "print-color-adjust:exact!important}.topnav{display:none!important}"
+                 "body{background:var(--bg)!important}.shell{max-width:none;padding:0}"
+                 "header,main{box-shadow:none}}</style>")
+    return page.replace("</head>", print_css + "</head>")
 
 
 HISTORY_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Output history — {workspace}</title><style>
 :root{{color-scheme:dark;--bg:#090d14;--panel:#111923;--line:#263449;--text:#edf3ff;--muted:#8495aa;--cyan:#5eead4;--blue:#6db5ff;--violet:#b69cff}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(140deg,#101b2b 0,#090d14 28rem);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}}main{{max-width:1040px;margin:auto;padding:22px 20px 56px}}header{{display:flex;align-items:end;justify-content:space-between;gap:20px;padding:0 2px 14px;border-bottom:1px solid var(--line);margin-bottom:10px}}.eyebrow{{color:var(--cyan);font-size:.66rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}}h1{{font-size:clamp(1.45rem,3vw,2rem);letter-spacing:-.035em;margin:.12rem 0 0}}.tools{{display:flex;align-items:center;gap:12px}}.counts{{color:var(--muted);font-size:.76rem;white-space:nowrap}}.filters{{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:9px;background:#0b111a}}.filters button{{border:0;border-radius:6px;padding:5px 8px;background:transparent;color:var(--muted);font:650 .7rem system-ui;cursor:pointer}}.filters button.active{{background:#1a2738;color:#fff}}.list{{display:grid}}.card{{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:11px;text-decoration:none;color:inherit;border-bottom:1px solid #202c3d;padding:9px 8px;min-height:58px;transition:.12s background,.12s border-color}}.card[hidden]{{display:none}}.card:hover{{background:#ffffff08;border-color:#3d5675}}.icon{{display:grid;place-items:center;width:28px;height:28px;border:1px solid #33445b;border-radius:8px;color:var(--blue);background:#101925;font-size:.72rem}}.artifact .icon{{color:var(--violet);border-color:#57477b;background:#19152a}}.copy{{min-width:0}}h2{{font-size:.92rem;line-height:1.25;margin:0;color:#f7f9ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}p{{color:#93a4b9;margin:3px 0 0;font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.side{{text-align:right;min-width:122px}}.meta{{color:var(--muted);font-size:.68rem;white-space:nowrap}}.kind{{display:inline-block;margin-top:3px;color:var(--cyan);font-size:.64rem;font-weight:750;letter-spacing:.055em;text-transform:uppercase}}.artifact .kind{{color:var(--violet)}}.empty{{padding:24px 8px;color:var(--muted)}}@media(max-width:700px){{main{{padding:16px 12px 40px}}header{{align-items:start;flex-direction:column}}.tools{{width:100%;justify-content:space-between}}.card{{grid-template-columns:26px minmax(0,1fr);padding:9px 4px}}.side{{grid-column:2;text-align:left;display:flex;gap:8px;align-items:center}}.kind{{margin:0}}}}
 </style></head><body><main><header><div><div class="eyebrow">RTIDE · output archive</div><h1>Output history</h1></div><div class="tools"><div class="filters"><button class="active" data-filter="all">All</button><button data-filter="artifact">Artifacts</button><button data-filter="response">Responses</button></div><div class="counts" id="counts">{count} outputs · {artifact_count} artifacts</div></div></header><div class="list">{cards}</div></main><script>const cards=[...document.querySelectorAll('.card')];const buttons=[...document.querySelectorAll('[data-filter]')];buttons.forEach(b=>b.onclick=()=>{{buttons.forEach(x=>x.classList.toggle('active',x===b));cards.forEach(c=>c.hidden=b.dataset.filter!=='all'&&c.dataset.kind!==b.dataset.filter);const shown=cards.filter(c=>!c.hidden).length;document.getElementById('counts').textContent=shown+' shown · '+cards.length+' total}});</script></body></html>"""
+
+# tweb intentionally does not execute scripts embedded in local artifact files.
+# Use real pages/links for archive filters so the controls remain functional.
+HISTORY_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Output history — {workspace}</title><style>
+:root{{color-scheme:dark;--bg:#090d14;--line:#263449;--text:#edf3ff;--muted:#8495aa;--cyan:#5eead4;--blue:#6db5ff;--violet:#b69cff}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(140deg,#101b2b 0,#090d14 28rem);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}}main{{max-width:1040px;margin:auto;padding:22px 20px 56px}}header{{display:flex;align-items:end;justify-content:space-between;gap:20px;padding:0 2px 14px;border-bottom:1px solid var(--line);margin-bottom:10px}}.eyebrow{{color:var(--cyan);font-size:.66rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}}h1{{font-size:clamp(1.45rem,3vw,2rem);letter-spacing:-.035em;margin:.12rem 0 0}}.tools{{display:flex;align-items:center;gap:12px}}.counts{{color:var(--muted);font-size:.76rem;white-space:nowrap}}.filters{{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:9px;background:#0b111a}}.filters a{{border-radius:6px;padding:5px 8px;color:var(--muted);font:650 .7rem system-ui;text-decoration:none}}.filters a.active{{background:#1a2738;color:#fff}}.list{{display:grid}}.card{{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:11px;text-decoration:none;color:inherit;border-bottom:1px solid #202c3d;padding:9px 8px;min-height:58px}}.card:hover{{background:#ffffff08}}.icon{{display:grid;place-items:center;width:28px;height:28px;border:1px solid #33445b;border-radius:8px;color:var(--blue);background:#101925;font-size:.72rem}}.artifact .icon{{color:var(--violet);border-color:#57477b;background:#19152a}}.copy{{min-width:0}}h2{{font-size:.92rem;line-height:1.25;margin:0;color:#f7f9ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}p{{color:#93a4b9;margin:3px 0 0;font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.side{{text-align:right;min-width:122px}}.meta{{color:var(--muted);font-size:.68rem;white-space:nowrap}}.kind{{display:inline-block;margin-top:3px;color:var(--cyan);font-size:.64rem;font-weight:750;letter-spacing:.055em;text-transform:uppercase}}.artifact .kind{{color:var(--violet)}}.empty{{padding:24px 8px;color:var(--muted)}}@media(max-width:700px){{main{{padding:16px 12px 40px}}header{{align-items:start;flex-direction:column}}.tools{{width:100%;justify-content:space-between}}.card{{grid-template-columns:26px minmax(0,1fr);padding:9px 4px}}.side{{grid-column:2;text-align:left;display:flex;gap:8px;align-items:center}}}}
+</style></head><body><main><header><div><div class="eyebrow">RTIDE · output archive</div><h1>Output history</h1></div><div class="tools"><nav class="filters" aria-label="Filter outputs"><a class="{all_active}" href="history.html">All</a><a class="{artifact_active}" href="history-artifacts.html">Artifacts</a><a class="{response_active}" href="history-responses.html">Responses</a></nav><div class="counts">{shown_count} shown · {count} total</div></div></header><div class="list">{cards}</div></main></body></html>"""
+
 
 VIEWER_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RTIDE output viewer</title><style>
 :root{{color-scheme:dark}}*{{box-sizing:border-box}}html,body{{height:100%;margin:0;overflow:hidden;background:#080c12}}body{{display:grid;grid-template-rows:42px minmax(0,1fr);font:12px/1 system-ui,sans-serif}}nav{{display:flex;align-items:center;gap:4px;padding:5px 9px;border-bottom:1px solid #273448;background:#0d141eee;color:#dbe7f7}}button,a{{height:30px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;padding:0 9px;background:transparent;color:inherit;text-decoration:none;font:650 12px/1 system-ui,sans-serif;cursor:pointer}}button:hover,a:hover{{background:#ffffff0d;border-color:#ffffff18}}button:disabled{{opacity:.3;cursor:default}}.outputs{{color:#5eead4}}.modes{{display:flex;gap:1px;padding:2px;border:1px solid #273448;border-radius:8px}}.modes button{{height:24px;padding:0 6px;color:#8495aa}}.modes button.active{{background:#1b293a;color:#fff}}.dots{{display:flex;align-items:center;gap:5px;max-width:min(26vw,260px);padding:0 6px;overflow:auto;scrollbar-width:none}}.dot{{width:7px;height:7px;min-width:7px;padding:0;border:0;border-radius:50%;background:#536176}}.dot.active{{background:#5eead4;box-shadow:0 0 0 3px #5eead426}}.counter{{color:#7f91a7;font-variant-numeric:tabular-nums;white-space:nowrap}}.spacer{{flex:1}}.raw{{color:#91a4ba}}iframe{{display:block;width:100%;height:100%;border:0;background:#090d14}}@media(max-width:760px){{.raw{{display:none}}.dots{{max-width:18vw}}}}
@@ -559,7 +581,13 @@ def build_viewer_html(entries):
               "kind": "artifact" if e.get("kind") == "custom artifact" else "response"}
              for e in entries if e.get("url")]
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
-    return VIEWER_PAGE.format(items=payload)
+    page = VIEWER_PAGE.format(items=payload)
+    print_css = ("<style>@media print{*{-webkit-print-color-adjust:exact!important;"
+                 "print-color-adjust:exact!important}nav{display:none!important}"
+                 "body{display:block!important;background:#090d14!important}"
+                 "iframe{position:fixed;inset:0;width:100%;height:100%;border:0}}"
+                 "</style>")
+    return page.replace("</head>", print_css + "</head>")
 
 
 def load_history(path):
@@ -579,9 +607,11 @@ def save_history(path, entries):
     os.replace(tmp, path)
 
 
-def build_history_html(entries, workspace):
+def build_history_html(entries, workspace, mode="all"):
     cards = []
-    for entry in reversed(entries):
+    visible = [entry for entry in entries if mode == "all" or
+               (mode == "artifact") == (entry.get("kind") == "custom artifact")]
+    for entry in reversed(visible):
         summary = " ".join(entry.get("request", "").split())[:110]
         kind = entry.get("kind", "result")
         is_artifact = kind == "custom artifact"
@@ -609,7 +639,20 @@ def build_history_html(entries, workspace):
     return HISTORY_PAGE.format(
         workspace=H.escape(workspace), cards="".join(cards),
         count=len(entries), artifact_count=artifact_count,
+        shown_count=len(visible),
+        all_active="active" if mode == "all" else "",
+        artifact_active="active" if mode == "artifact" else "",
+        response_active="active" if mode == "response" else "",
     )
+
+
+def write_history_pages(tweb_dir, entries, workspace):
+    for name, mode in (("history.html", "all"),
+                       ("history-artifacts.html", "artifact"),
+                       ("history-responses.html", "response"),
+                       ("agent.html", "all")):
+        with open(os.path.join(tweb_dir, name), "w") as f:
+            f.write(build_history_html(entries, workspace, mode))
 
 
 def main():
@@ -661,14 +704,11 @@ def main():
     save_history(history_data_path, history)
     with open(viewer_path, "w") as f:
         f.write(build_viewer_html(history))
-    initial_history = build_history_html(history, workspace)
-    for path in (history_path, legacy_history_path):
-        with open(path, "w") as f:
-            f.write(initial_history)
+    write_history_pages(tweb_dir, history, workspace)
 
     clear()
     status(f"rtide-agent: {harness} + {provider} ({model})")
-    status(f"{GREEN}●{RESET} idle · /help for queue and steering controls")
+    idle_status()
 
     pending = []
     last_request = ""
@@ -677,7 +717,7 @@ def main():
             req = pending.pop(0)
         else:
             try:
-                req = input("> ")
+                req = input(PROMPT)
             except (EOFError, KeyboardInterrupt):
                 clear()
                 status("bye")
@@ -758,10 +798,7 @@ def main():
         }
         history.append(entry)
         save_history(history_data_path, history)
-        history_html = build_history_html(history, workspace)
-        for path in (history_path, legacy_history_path):
-            with open(path, "w") as f:
-                f.write(history_html)
+        write_history_pages(tweb_dir, history, workspace)
         with open(viewer_path, "w") as f:
             f.write(build_viewer_html(history))
 

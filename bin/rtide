@@ -668,6 +668,7 @@ cmd_menu() {
     "Config…"          c "display-popup -E -w 70% -h 50% 'sh -c \"rtide config; echo; read -p done\"'" \
     "Output history"   h "run-shell 'rtide history ${sess}'" \
     "Export output PDF" p "display-popup -E -w 72% -h 20% 'sh -c \"rtide pdf ${sess}; echo; read -p done\"'" \
+    "Dictate prompt…"  v "display-popup -E -w 64% -h 25% 'rtide-dictate #{pane_id}'" \
     "Sweep memories"   s "run-shell 'rtide sweep'" \
     "" \
     "Detach"           d "detach-client" \
@@ -711,6 +712,9 @@ cmd_pdf() {
     out="$dir/exports/${name}-$(date +%Y%m%d-%H%M%S).pdf"
   fi
   tweb navigate --pane "$tweb" "$target" >/dev/null
+  tweb eval --pane "$tweb" \
+    "(()=>{const s=document.createElement('style');s.textContent='@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}';document.head.appendChild(s);return true})()" \
+    >/dev/null 2>&1 || true
   tweb pdf --pane "$tweb" "$out" >/dev/null
   [[ "$current" == "$target" ]] || tweb navigate --pane "$tweb" "$current" >/dev/null
   echo "pdf: $out"
@@ -722,7 +726,7 @@ cmd_slash_menu() {
   [[ -n "$pane" ]] || exit 1
   role=$(tmux display-message -p -t "$pane" '#{@rtide-role}' 2>/dev/null || true)
   line=$(tmux capture-pane -p -t "$pane" -S -1 2>/dev/null | tail -1)
-  if [[ "$role" != agent || ! "$line" =~ ^\>\ *$ ]]; then
+  if [[ "$role" != agent || ! "$line" =~ ^(\>|╰─❯)\ *$ ]]; then
     tmux send-keys -t "$pane" -l '/'
     exit 0
   fi
@@ -749,6 +753,11 @@ bind_slash_menu() {
     tmux bind-key -n / if-shell -F '#{==:#{@rtide-role},agent}' \
       "run-shell 'rtide slash-menu #{pane_id}'" "send-keys /"
   fi
+}
+
+bind_dictation() {
+  tmux bind-key v display-popup -E -w 64% -h 25% \
+    "rtide-dictate '#{pane_id}'"
 }
 
 case "${1:-}" in
@@ -923,6 +932,7 @@ fi
 # Global bindings that resolve panes by title in the current session at press-time
 bind_if_free t "run-shell 'rtide zoom tweb'"
 bind_if_free a "run-shell 'rtide zoom agent'"
+bind_dictation
 bind_if_free r "run-shell 'rtide switch'"
 bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
 bind_if_free R "run-shell 'rtide refresh #{session_name}'"
