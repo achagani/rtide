@@ -550,6 +550,10 @@ cmd_refresh() {
   agent_lines="${agent_lines:-3}"
   nvim_pct="${nvim_pct:-50}"
 
+  # Refresh always restores client-relative sizing. This also repairs older
+  # sessions created while RTIDE left their tmux window in manual-size mode.
+  tmux set-option -w -t "$sess:work" window-size latest 2>/dev/null || true
+
   # unzoom first if a pane is zoomed, so the resize targets the real layout
   if [[ "$(tmux display-message -p -t "$sess:work" '#{window_zoomed_flag}')" == "1" ]]; then
     tmux resize-pane -Z -t "$(tmux display-message -p -t "$sess:work" '#{pane_id}')"
