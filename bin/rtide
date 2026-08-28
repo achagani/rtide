@@ -560,7 +560,10 @@ cmd_refresh() {
 cmd_menu() {
   local sess="${2:-$(tmux display-message -p '#{session_name}' 2>/dev/null || true)}"
   [[ -n "$sess" ]] || { echo "menu: not in a tmux session — pass a session: rtide menu <session>" >&2; exit 1; }
-  tmux display-menu -T "#[align=centre] RTIDE — ${sess}" -x C -y C \
+  # Keep the menu inside the terminal-rendered left side. Centering it across
+  # the full window can place half of it beneath tweb's graphical pane layer,
+  # which visually clips the right side of the menu.
+  tmux display-menu -T "#[align=centre] RTIDE actions" -x 2 -y C \
     "Switch workspace" r "display-popup -E -w 80% -h 70% 'rtide switch'" \
     "Change agent…"    m "display-popup -E -w 80% -h 70% 'rtide agent'" \
     "New workspace…"   n "display-popup -E -w 80% -h 70% 'rtide new'" \
