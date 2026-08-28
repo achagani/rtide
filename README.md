@@ -1,4 +1,20 @@
-# RTIDE — Rich Terminal IDE
+<p align="center">
+  <img src="docs/assets/rtide-mark.png" width="180" alt="RTIDE logo">
+</p>
+
+<h1 align="center">RTIDE — Rich Terminal IDE</h1>
+
+<p align="center"><strong>Keep the speed of the terminal. Get the expressive range of the web.</strong></p>
+
+<p align="center">
+  <a href="https://achagani.github.io/rtide/">Website</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#what-you-get">Features</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/rtide-workspace.png" alt="RTIDE workspace with Neovim, rich tweb output, and agent prompt">
+</p>
 
 A terminal-based agentic development workspace with a **blended single-tool UI**:
 the agent's terminal is the *input* surface, and all substantive output is

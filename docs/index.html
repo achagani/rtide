@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080b16">
+  <meta name="description" content="RTIDE turns the terminal into an AI input surface and the browser into a rich visual canvas.">
+  <meta property="og:title" content="RTIDE — Rich Terminal IDE">
+  <meta property="og:description" content="Keep the speed of the terminal. Get the expressive range of the web.">
+  <meta property="og:image" content="assets/rtide-workspace.png">
+  <title>RTIDE — Rich Terminal IDE</title>
+  <link rel="icon" href="assets/rtide-mark.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <nav class="nav wrap">
+    <a class="brand" href="#top"><img src="assets/rtide-mark.png" alt=""><span>RTIDE</span></a>
+    <div class="navlinks"><a href="#experience">Experience</a><a href="#features">Features</a><a class="pill" href="https://github.com/achagani/rtide">GitHub ↗</a></div>
+  </nav>
+
+  <main id="top">
+    <section class="hero wrap">
+      <div class="orb" aria-hidden="true"></div>
+      <div class="hero-copy">
+        <p class="kicker"><span></span> Rich terminal IDE</p>
+        <h1>The terminal,<br><em>with an imagination.</em></h1>
+        <p class="lede">RTIDE keeps the agent prompt fast and focused while every substantial answer becomes a rich, browsable visual artifact.</p>
+        <div class="actions"><a class="primary" href="https://github.com/achagani/rtide#install">Install RTIDE</a><a class="secondary" href="#experience">See the workspace ↓</a></div>
+        <div class="install"><code>curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash</code><button aria-label="Copy install command">Copy</button></div>
+      </div>
+      <div class="mark"><img src="assets/rtide-mark.png" alt="RTIDE split-pane terminal and visual canvas emblem"></div>
+    </section>
+
+    <section class="showcase wrap" id="experience">
+      <div class="showcase-head"><div><p class="kicker">One workspace · two modes of thought</p><h2>Type simply. See richly.</h2></div><p>Code remains tactile in Neovim. The agent stays a compact command deck. Research, plans, diagrams, and artifacts open in tweb—ready to browse, revisit, or export.</p></div>
+      <div class="window">
+        <div class="chrome"><i></i><i></i><i></i><span>rtide-test10 · active workspace</span><b>● live</b></div>
+        <div class="screen"><img src="assets/rtide-workspace.png" alt="RTIDE workspace showing Neovim, a rich tweb output, and the agent prompt"></div>
+      </div>
+      <div class="caption"><span>01</span><p><b>Agent input</b><br>Steer, interrupt, queue, resend, or dictate.</p><span>02</span><p><b>Visual output</b><br>Artifacts, history, navigation, and clean PDF export.</p><span>03</span><p><b>Editor context</b><br>Real files open directly in Neovim as the agent works.</p></div>
+    </section>
+
+    <section class="features wrap" id="features">
+      <article class="feature feature-wide"><p class="num">01 / OUTPUT</p><h3>Answers become artifacts.</h3><p>RTIDE asks agents to choose the visual form that fits: timelines, maps, comparison grids, research briefs, diagrams, or focused prose.</p><div class="mini-art"><span class="line"></span><span class="node n1"></span><span class="node n2"></span><span class="node n3"></span><b>research</b><b>shape</b><b>render</b></div></article>
+      <article class="feature"><p class="num">02 / FLOW</p><h3>Stay in motion.</h3><p>Queue follow-ups while a turn runs. Steer without restarting. Use voice when typing gets in the way.</p><div class="command">╰─❯ <span>make the weather risk visual</span><i>🎙</i></div></article>
+      <article class="feature"><p class="num">03 / MEMORY</p><h3>Every output, kept.</h3><p>Browse responses and artifacts independently, jump with arrow keys, filter the archive, and export the work that matters.</p><div class="dots">● ● ● ● ● <strong>●</strong> ●</div></article>
+      <article class="feature feature-wide matrix"><p class="num">04 / CHOICE</p><h3>Your harness. Your provider.</h3><p>Claude, Codex, Hermes, or OpenCode—backed by Anthropic, OpenAI, or local Ollama models. RTIDE is the workspace layer, not another lock-in.</p><div class="matrix-row"><span>CLAUDE</span><span>CODEX</span><span>HERMES</span><span>OPENCODE</span></div></article>
+    </section>
+
+    <section class="closing wrap"><img src="assets/rtide-mark.png" alt=""><p class="kicker">Build in the terminal. Present on the web.</p><h2>A workspace that speaks<br>both languages.</h2><a class="primary" href="https://github.com/achagani/rtide">Explore RTIDE on GitHub ↗</a></section>
+  </main>
+  <footer class="wrap"><span>RTIDE · Rich Terminal IDE</span><span>Open source on GitHub</span></footer>
+  <script>
+    document.querySelector('.install button').onclick=async e=>{await navigator.clipboard.writeText(document.querySelector('.install code').textContent);e.currentTarget.textContent='Copied';setTimeout(()=>e.currentTarget.textContent='Copy',1400)};
+  </script>
+</body>
+</html>
