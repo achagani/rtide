@@ -85,4 +85,6 @@ with tempfile.TemporaryDirectory(prefix="rtide-dictate-") as tmp:
         fail("no speech recognized")
     subprocess.run(["tmux", "set-buffer", "--", text], check=True)
     subprocess.run(["tmux", "paste-buffer", "-t", pane], check=True)
+    subprocess.run(["tmux", "send-keys", "-t", pane, "End"], check=True)
+    subprocess.run(["tmux", "select-pane", "-t", pane], check=True)
     print(f"✓ inserted {len(text.split())} words")
