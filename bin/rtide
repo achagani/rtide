@@ -734,6 +734,12 @@ cmd_pdf() {
   # Chromium print-to-PDF can drop backgrounds and clip tall local artifacts.
   # Capture the complete rendered document and wrap that exact visual in one
   # continuous PDF page instead. This preserves every color and every pixel.
+  # tweb's N / tab-count badges live in a preload-injected host rather than in
+  # the artifact DOM; omit that browsing chrome from the exported document.
+  tweb eval --pane "$tweb" \
+    'document.getElementById("__tweb_mode__")?.remove(); true' \
+    >/dev/null 2>&1 || true
+  tweb wait --pane "$tweb" --ms 50 >/dev/null 2>&1 || true
   capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/rtide-pdf.XXXXXX")
   if command -v magick >/dev/null 2>&1 \
       && tweb full-screenshot --pane "$tweb" "$capture_dir/output.png" >/dev/null \
@@ -742,13 +748,21 @@ cmd_pdf() {
   else
     find "$capture_dir" -type f -delete 2>/dev/null || true
     rmdir "$capture_dir" 2>/dev/null || true
-    [[ "$current" == "$target" ]] || tweb navigate --pane "$tweb" "$current" >/dev/null
+    if [[ "$current" == "$target" ]]; then
+      tweb reload --pane "$tweb" >/dev/null 2>&1 || true
+    else
+      tweb navigate --pane "$tweb" "$current" >/dev/null
+    fi
     echo "pdf: exact export requires tweb full-screenshot and ImageMagick" >&2
     exit 1
   fi
   find "$capture_dir" -type f -delete
   rmdir "$capture_dir"
-  [[ "$current" == "$target" ]] || tweb navigate --pane "$tweb" "$current" >/dev/null
+  if [[ "$current" == "$target" ]]; then
+    tweb reload --pane "$tweb" >/dev/null 2>&1 || true
+  else
+    tweb navigate --pane "$tweb" "$current" >/dev/null
+  fi
   echo "pdf: $out"
   if [[ "${RTIDE_PDF_REVEAL:-1}" != 0 ]]; then
     if command -v nautilus >/dev/null 2>&1; then
