@@ -68,6 +68,20 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn("╰─❯", AGENT.PROMPT)
         self.assertTrue(callable(AGENT.readline.redisplay))
 
+    def test_request_context_is_expanded_by_default(self):
+        page = AGENT.build_result_html("Original request", "Answer", "demo", 1)
+        self.assertIn('<details class="request" open>', page)
+
+    def test_question_output_has_choice_and_freeform_ui(self):
+        response = "Which direction should I take?\n\n1. Fast route\n2. Scenic route"
+        page = AGENT.build_result_html(
+            "Plan it", response, "demo", 1, "http://127.0.0.1:123/reply/token"
+        )
+        self.assertIn("Input requested", page)
+        self.assertIn('value="Fast route"', page)
+        self.assertIn('textarea name="answer"', page)
+        self.assertIn("Send response", page)
+
     def test_live_input_controls(self):
         self.assertEqual(AGENT.classify_live_input("follow up"),
                          ("queue", "follow up"))
