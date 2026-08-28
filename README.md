@@ -18,7 +18,7 @@ content (3 lines by default, set with `agent_lines` in `~/.rtide/config`); the
 nvim + tweb panes get the rest. It shows a one-line status (`● idle` / `● working: Edit src/app.py` /
 `● done (12s)`) and a prompt — type a request, and the harness runs
 non-interactively, rendering its response to tweb. Zoom it with `prefix+a` when
-you need to work in it.
+you need to work in it. New workspaces start with keyboard focus in this prompt.
 
 ## What you get
 

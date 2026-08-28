@@ -749,7 +749,9 @@ bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide qu
 bind_if_free R "run-shell 'rtide refresh #{session_name}'"
 bind_if_free A "run-shell 'rtide menu #{session_name}'"
 tmux select-window -t "$S:work"
-tmux select-pane -t "$NVIM_PANE"
+# A new workspace opens ready for the user's first request. Existing workspace
+# resumes still return to the editor via resume_session().
+tmux select-pane -t "$AGENT_PANE"
 if [[ -z "${TMUX:-}" ]]; then
   tmux attach -t "$S" 2>/dev/null || echo "workspace $S created — attach with: tmux attach -t $S"
 else
