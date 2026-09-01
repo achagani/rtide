@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Install and atomically activate an immutable per-user RTIDE release.
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+SOURCE_VERSION=$(tr -d '[:space:]' < "$ROOT/VERSION")
+PAYLOAD="${1:-$ROOT/build/rtide-$SOURCE_VERSION}"
+VERSION=$(tr -d '[:space:]' < "$PAYLOAD/VERSION")
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid payload VERSION: $VERSION" >&2; exit 1; }
+INSTALL_ROOT="${RTIDE_INSTALL_ROOT:-$HOME/.local/lib/rtide}"
+BIN_DIR="${RTIDE_BIN_DIR:-$HOME/.local/bin}"
+VERSIONS_DIR="$INSTALL_ROOT/versions"
+RELEASE="$VERSIONS_DIR/$VERSION"
+COMMANDS=(rtide-provider rtide-mcp rtide-mem rtide-agent rtide-dictate rtide-open tweb-render tweb-run)
+
+python3 "$ROOT/scripts/package-tool" verify "$PAYLOAD" >/dev/null
+mkdir -p "$VERSIONS_DIR" "$BIN_DIR"
+
+if [[ -d "$RELEASE" ]]; then
+  source_content=$(sed -n 's/^content_digest=//p' "$PAYLOAD/BUILD-INFO")
+  installed_content=$(sed -n 's/^content_digest=//p' "$RELEASE/BUILD-INFO" 2>/dev/null || true)
+  if ! python3 "$ROOT/scripts/package-tool" verify "$RELEASE" >/dev/null 2>&1; then
+    # One-time migration for pre-manifest-format development installs. Runtime
+    # files must still match exactly; differing contents remain immutable.
+    installed_content=$(python3 "$ROOT/scripts/package-tool" content-digest "$RELEASE")
+    if [[ -n "$source_content" && "$source_content" == "$installed_content" ]]; then
+      stage=$(mktemp -d "$INSTALL_ROOT/.stage-$VERSION.XXXXXX")
+      backup="$INSTALL_ROOT/.legacy-$VERSION.$$"
+      trap '[[ -z "${stage:-}" ]] || rm -rf -- "$stage"' EXIT
+      cp -a "$PAYLOAD/." "$stage/"
+      python3 "$ROOT/scripts/package-tool" verify "$stage" >/dev/null
+      mv "$RELEASE" "$backup"
+      if mv "$stage" "$RELEASE"; then
+        stage=""
+        rm -rf -- "$backup"
+        trap - EXIT
+      else
+        mv "$backup" "$RELEASE"
+        exit 1
+      fi
+    fi
+  fi
+  [[ -n "$source_content" && "$source_content" == "$installed_content" ]] || {
+    echo "RTIDE $VERSION is already installed with different contents; bump VERSION" >&2
+    exit 1
+  }
+else
+  stage=$(mktemp -d "$INSTALL_ROOT/.stage-$VERSION.XXXXXX")
+  trap '[[ -z "${stage:-}" ]] || rm -rf -- "$stage"' EXIT
+  cp -a "$PAYLOAD/." "$stage/"
+  python3 "$ROOT/scripts/package-tool" verify "$stage" >/dev/null
+  mv "$stage" "$RELEASE"
+  stage=""
+  trap - EXIT
+fi
+
+# The launcher remains independent of the selected release so rollback still
+# works when an active payload is broken. Replace it atomically.
+launcher_tmp="$BIN_DIR/.rtide.$$"
+cp "$ROOT/scripts/rtide-launcher" "$launcher_tmp"
+chmod 755 "$launcher_tmp"
+mv -f "$launcher_tmp" "$BIN_DIR/rtide"
+
+for command in "${COMMANDS[@]}"; do
+  link_tmp="$BIN_DIR/.$command.$$"
+  ln -s "$INSTALL_ROOT/current/bin/$command" "$link_tmp"
+  mv -Tf "$link_tmp" "$BIN_DIR/$command"
+done
+
+current_tmp="$INSTALL_ROOT/.current.$$"
+ln -s "versions/$VERSION" "$current_tmp"
+mv -Tf "$current_tmp" "$INSTALL_ROOT/current"
+
+# Retain the active release and the two highest-version rollback candidates.
+python3 - "$VERSIONS_DIR" "$VERSION" <<'PY'
+from pathlib import Path
+import re
+import shutil
+import sys
+
+versions_dir = Path(sys.argv[1]).resolve()
+active = sys.argv[2]
+valid = re.compile(r"^\d+\.\d+\.\d+$")
+versions = [path for path in versions_dir.iterdir() if path.is_dir() and valid.fullmatch(path.name)]
+others = sorted(
+    (path for path in versions if path.name != active),
+    key=lambda path: tuple(map(int, path.name.split("."))),
+    reverse=True,
+)
+for path in others[2:]:
+    shutil.rmtree(path)
+PY
+
+installed=$($BIN_DIR/rtide --version)
+[[ "$installed" == "rtide $VERSION" ]] || { echo "installed version check failed: $installed" >&2; exit 1; }
+echo "installed $installed"
+echo "active: $RELEASE"

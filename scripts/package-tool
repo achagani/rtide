@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Build and verify deterministic RTIDE runtime payloads."""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import io
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tarfile
+
+PAYLOAD_DIRS = ("bin", "share")
+PAYLOAD_FILES = ("VERSION",)
+PAYLOAD_ASSETS = (("docs/assets/rtide-mark.png", "share/assets/rtide-mark.png"),)
+
+
+def digest(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def version_at(root: Path) -> str:
+    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    parts = version.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        raise SystemExit(f"invalid VERSION: {version!r}")
+    return version
+
+
+def source_revision(root: Path) -> str:
+    try:
+        revision = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"], text=True
+        ).strip()
+        dirty = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        return revision + ("-dirty" if dirty else "")
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def payload_paths(payload: Path):
+    for path in sorted(payload.rglob("*")):
+        if path.is_file() and path.name != "MANIFEST.sha256":
+            yield path
+
+
+def content_paths(payload: Path):
+    for path in payload_paths(payload):
+        if path.name != "BUILD-INFO":
+            yield path
+
+
+def content_digest(payload: Path) -> str:
+    value = hashlib.sha256()
+    for path in content_paths(payload):
+        relative = path.relative_to(payload).as_posix().encode()
+        value.update(len(relative).to_bytes(4, "big"))
+        value.update(relative)
+        value.update(bytes.fromhex(digest(path)))
+    return value.hexdigest()
+
+
+def refresh_build_info(payload: Path, revision: str | None = None) -> None:
+    if revision is None:
+        existing = payload / "BUILD-INFO"
+        revision = "unknown"
+        if existing.is_file():
+            for line in existing.read_text(encoding="utf-8").splitlines():
+                if line.startswith("source_revision="):
+                    revision = line.partition("=")[2]
+                    break
+    info = (
+        f"version={version_at(payload)}\n"
+        f"source_revision={revision}\n"
+        f"content_digest={content_digest(payload)}\n"
+    )
+    (payload / "BUILD-INFO").write_text(info, encoding="utf-8")
+
+
+def write_manifest(payload: Path) -> None:
+    lines = [f"{digest(path)}  {path.relative_to(payload).as_posix()}" for path in payload_paths(payload)]
+    (payload / "MANIFEST.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def verify(payload: Path) -> None:
+    version = version_at(payload)
+    manifest = payload / "MANIFEST.sha256"
+    if not manifest.is_file():
+        raise SystemExit(f"missing manifest: {manifest}")
+    expected: dict[str, str] = {}
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        checksum, separator, relative = line.partition("  ")
+        relative_path = Path(relative)
+        if (
+            not separator
+            or len(checksum) != 64
+            or relative_path.is_absolute()
+            or ".." in relative_path.parts
+        ):
+            raise SystemExit(f"invalid manifest line: {line!r}")
+        expected[relative] = checksum
+    actual = {path.relative_to(payload).as_posix(): digest(path) for path in payload_paths(payload)}
+    if expected != actual:
+        missing = sorted(set(expected) - set(actual))
+        extra = sorted(set(actual) - set(expected))
+        changed = sorted(path for path in expected.keys() & actual.keys() if expected[path] != actual[path])
+        raise SystemExit(f"manifest mismatch: missing={missing} extra={extra} changed={changed}")
+    recorded_content = ""
+    for line in (payload / "BUILD-INFO").read_text(encoding="utf-8").splitlines():
+        if line.startswith("content_digest="):
+            recorded_content = line.partition("=")[2]
+            break
+    if recorded_content != content_digest(payload):
+        raise SystemExit("BUILD-INFO content digest does not match runtime contents")
+    if not (payload / "bin" / "rtide").is_file():
+        raise SystemExit("payload is missing bin/rtide")
+    print(f"verified rtide {version}: {digest(manifest)[:12]}")
+
+
+def copy_payload(root: Path, payload: Path) -> None:
+    if payload.exists():
+        shutil.rmtree(payload)
+    payload.mkdir(parents=True)
+    for name in PAYLOAD_FILES:
+        shutil.copy2(root / name, payload / name)
+    for name in PAYLOAD_DIRS:
+        shutil.copytree(
+            root / name,
+            payload / name,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
+    for source, destination in PAYLOAD_ASSETS:
+        target = payload / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / source, target)
+    refresh_build_info(payload, source_revision(root))
+    write_manifest(payload)
+
+
+def deterministic_archive(payload: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for path in sorted(payload.rglob("*")):
+            relative = Path(payload.name) / path.relative_to(payload)
+            info = archive.gettarinfo(str(path), arcname=relative.as_posix())
+            info.uid = info.gid = 0
+            info.uname = info.gname = "root"
+            info.mtime = 0
+            if path.is_file():
+                with path.open("rb") as handle:
+                    archive.addfile(info, handle)
+            else:
+                archive.addfile(info)
+    with destination.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+            compressed.write(buffer.getvalue())
+
+
+def build(root: Path, build_dir: Path, dist_dir: Path) -> Path:
+    version = version_at(root)
+    payload = build_dir / f"rtide-{version}"
+    copy_payload(root, payload)
+    verify(payload)
+    archive = dist_dir / f"rtide-{version}.tar.gz"
+    deterministic_archive(payload, archive)
+    (archive.with_suffix(archive.suffix + ".sha256")).write_text(
+        f"{digest(archive)}  {archive.name}\n", encoding="utf-8"
+    )
+    print(f"built {archive}")
+    return payload
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    build_parser = subparsers.add_parser("build")
+    build_parser.add_argument("--root", type=Path, default=Path.cwd())
+    build_parser.add_argument("--build-dir", type=Path, default=Path("build"))
+    build_parser.add_argument("--dist-dir", type=Path, default=Path("dist"))
+    verify_parser = subparsers.add_parser("verify")
+    verify_parser.add_argument("payload", type=Path)
+    manifest_parser = subparsers.add_parser("manifest")
+    manifest_parser.add_argument("payload", type=Path)
+    digest_parser = subparsers.add_parser("content-digest")
+    digest_parser.add_argument("payload", type=Path)
+    args = parser.parse_args()
+    if args.command == "build":
+        build(args.root.resolve(), args.build_dir.resolve(), args.dist_dir.resolve())
+    elif args.command == "verify":
+        verify(args.payload.resolve())
+    elif args.command == "manifest":
+        refresh_build_info(args.payload.resolve())
+        write_manifest(args.payload.resolve())
+    else:
+        print(content_digest(args.payload.resolve()))
+
+
+if __name__ == "__main__":
+    main()

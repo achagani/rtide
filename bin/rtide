@@ -25,12 +25,33 @@
 #   rtide --no-ask   → skip the provider/harness prompt (use stored config)
 set -euo pipefail
 
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || realpath "$0")
+RTIDE_ROOT="${RTIDE_ROOT:-$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)}"
+SELF_DIR="$RTIDE_ROOT/bin"
 PROVIDER_BIN="$SELF_DIR/rtide-provider"
-TWEB_DIR="$HOME/rtide/share"
-CONFIG_DIR="$HOME/.rtide"
+TWEB_DIR="$RTIDE_ROOT/share"
+CONFIG_DIR="${RTIDE_CONFIG_DIR:-$HOME/.rtide}"
 CONFIG="$CONFIG_DIR/config"
 WS_AGENT_FILE=".rtide/agent"   # per-workspace override, relative to the workspace dir
+SESSION_PREFIX="${RTIDE_SESSION_PREFIX:-rtide-}"
+printf -v RTIDE_CMD '%q' "$SCRIPT_PATH"
+printf -v RTIDE_AGENT_CMD '%q' "$SELF_DIR/rtide-agent"
+printf -v RTIDE_MEM_CMD '%q' "$SELF_DIR/rtide-mem"
+
+cmd_version() {
+  local verbose="${1:-}" version revision digest
+  version=$(tr -d '[:space:]' < "$RTIDE_ROOT/VERSION" 2>/dev/null || printf 'unknown')
+  printf 'rtide %s\n' "$version"
+  [[ "$verbose" == --verbose ]] || return 0
+  revision=$(sed -n 's/^source_revision=//p' "$RTIDE_ROOT/BUILD-INFO" 2>/dev/null | head -1)
+  if [[ -z "$revision" ]] && git -C "$RTIDE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    revision=$(git -C "$RTIDE_ROOT" rev-parse --short HEAD 2>/dev/null || true)
+  fi
+  digest=$(sha256sum "$RTIDE_ROOT/MANIFEST.sha256" 2>/dev/null | awk '{print $1}' || true)
+  printf 'root: %s\n' "$RTIDE_ROOT"
+  [[ -z "$revision" ]] || printf 'source: %s\n' "$revision"
+  [[ -z "$digest" ]] || printf 'digest: %s\n' "$digest"
+}
 
 if [[ "${1:-}" == "--no-ask" ]]; then RTIDE_ASK=0; shift; fi
 
@@ -167,6 +188,11 @@ EOF
   echo "Saved to $CONFIG"
 }
 
+cmd_setup() {
+  setup_wizard
+  "$SELF_DIR/rtide-mcp"
+}
+
 cmd_doctor() {
   local ok=1
   for c in tweb tmux nvim; do
@@ -205,8 +231,8 @@ cmd_new() {
 }
 
 cmd_fork() {
-  local sess="${2:-}" source_window="${3:-}" requested_name="${4:-}" source_target nvim source root primary parent base number name branch fork_dir patch_file untracked
-  local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page
+  local sess="${2:-}" source_window="${3:-}" requested_name="${4:-}" initial_prompt="${5:-}" source_target nvim source root primary parent base number name branch fork_dir patch_file untracked
+  local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready
   [[ -n "$sess" ]] || sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
   [[ -n "$sess" ]] && tmux has-session -t "$sess" 2>/dev/null \
     || { echo "fork: no RTIDE workspace session" >&2; exit 1; }
@@ -315,10 +341,11 @@ PY
   harness="${harness:-${agent:-}}"; agent_lines="${agent_lines:-3}"
   tweb_pct="${tweb_pct:-60}"; shell="${shell:-bash}"
   fork_window=$(tmux new-window -d -P -F '#{window_id}' -t "$sess:" -n "fork-$number" -c "$fork_dir")
+  tmux set-option -w -t "$fork_window" @rtide-workspace "$fork_dir"
   nvim_pane=$(tmux list-panes -t "$fork_window" -F '#{pane_id}' | head -1)
   tmux set-option -p -t "$nvim_pane" @rtide-role nvim
   tmux select-pane -t "$nvim_pane" -T nvim
-  tmux send-keys -t "$nvim_pane" "SHELL=$shell nvim --listen '$fork_dir/.rtide/nvim.sock'" Enter
+  tmux send-keys -t "$nvim_pane" "SHELL=$shell nvim --listen '$fork_dir/.rtide/nvim.sock' '$fork_dir'" Enter
   agent_pane=$(tmux split-window -d -v -P -F '#{pane_id}' -t "$nvim_pane" -l "$agent_lines" -c "$fork_dir")
   tmux set-option -p -t "$agent_pane" @rtide-role agent
   tmux select-pane -t "$agent_pane" -T agent
@@ -332,16 +359,34 @@ PY
     first_page="$fork_dir/.tweb/welcome.html"
   fi
   tmux send-keys -t "$tweb_pane" "tweb open file://$first_page" Enter
-  tmux send-keys -t "$agent_pane" "rtide-agent $harness $provider $model $fork_dir" Enter
+  tmux send-keys -t "$agent_pane" "$RTIDE_AGENT_CMD $harness $provider $model $fork_dir" Enter
   width=$(tmux display-message -p -t "$fork_window" '#{window_width}')
   tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
   tmux resize-pane -t "$agent_pane" -y "$agent_lines"
   tmux resize-pane -t "$tweb_pane" -x "$tweb_w"
   tmux set-option -w -t "$fork_window" window-size latest 2>/dev/null || true
   tmux set-hook -w -t "$fork_window" after-resize-window \
-    "run-shell 'rtide refresh-window $fork_window >/dev/null 2>&1'" 2>/dev/null || true
+    "run-shell '$RTIDE_CMD refresh-window $fork_window >/dev/null 2>&1'" 2>/dev/null || true
   tmux select-window -t "$fork_window"
   tmux select-pane -t "$agent_pane"
+  if [[ -n "$initial_prompt" ]]; then
+    ready=0
+    for _ in $(seq 1 150); do
+      if tmux capture-pane -p -t "$agent_pane" -S -6 2>/dev/null | grep -q '╰─❯'; then
+        ready=1
+        break
+      fi
+      sleep 0.1
+    done
+    if (( ! ready )); then
+      echo "fork: new prompt pane did not become ready" >&2
+      exit 1
+    fi
+    # send-keys -l passes the prompt as literal text, avoiding shell quoting
+    # failures for apostrophes, command substitutions, or other punctuation.
+    tmux send-keys -t "$agent_pane" -l "$initial_prompt"
+    tmux send-keys -t "$agent_pane" Enter
+  fi
   exit 0
 }
 
@@ -363,11 +408,11 @@ install_session_hooks() {
   # Terminal maximize/restore changes the tmux window size proportionally.
   # Reapply RTIDE's exact strip height and column split after each client resize.
   tmux set-hook -t "$sess" client-resized \
-    "run-shell 'rtide refresh $quoted >/dev/null 2>&1'" 2>/dev/null || true
+    "run-shell '$RTIDE_CMD refresh $quoted >/dev/null 2>&1'" 2>/dev/null || true
   # after-resize-window is the authoritative geometry event on tmux 3.6 and
   # also covers programmatic/terminal-driven window changes.
   tmux set-hook -t "$sess" after-resize-window \
-    "run-shell 'rtide refresh-window #{window_id} >/dev/null 2>&1'" 2>/dev/null || true
+    "run-shell '$RTIDE_CMD refresh-window #{window_id} >/dev/null 2>&1'" 2>/dev/null || true
 }
 
 # Resume a workspace on its editor pane. tmux remembers the last active pane
@@ -401,7 +446,7 @@ resume_session() {
 cmd_pick() {
   local sessions cur s dir sdir disp
   local -a items=()
-  sessions=$(tmux list-sessions -F "#{session_name}"$'\t'"#{session_path}" 2>/dev/null | grep '^rtide-' || true)
+  sessions=$(tmux list-sessions -F "#{session_name}"$'\t'"#{session_path}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
   if [[ -z "$sessions" ]]; then
     echo "no workspaces — start a new one"
     exec "$0" new
@@ -432,6 +477,7 @@ cmd_pick() {
       # that filtered everything out).
       if out=$(printf '%s\n' "${items[@]}" | fzf --ansi --print-query \
             --no-sort --layout=reverse --header-first \
+            --color='bg:#202334,bg+:#313244,fg:#cdd6f4,fg+:#f5e0dc,hl:#89dceb,hl+:#f5c2e7,border:#cba6f7,prompt:#89dceb,pointer:#f5c2e7,marker:#a6e3a1,header:#94e2d5,info:#a6adc8' \
             --header=$'RTIDE — resume a workspace\nEnter = open   type "new" + Enter = start one   Esc = quit' \
             --prompt='❯ ' --height=60% --border \
             --preview-window=right:40% \
@@ -504,14 +550,14 @@ cmd_pick() {
 
 cmd_ls() {
   tmux list-sessions -F '#{session_name}  #{session_windows}w  #{session_attached}attached' 2>/dev/null \
-    | grep '^rtide-' || echo "no workspaces"
+    | grep "^${SESSION_PREFIX}" || echo "no workspaces"
   exit 0
 }
 
 cmd_sweep() {
   local s
-  for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^rtide-'); do
-    rtide-mem sweep "$s"
+  for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^${SESSION_PREFIX}"); do
+    "$SELF_DIR/rtide-mem" sweep "$s"
   done
   exit 0
 }
@@ -526,11 +572,11 @@ cmd_quit() {
     if tmux has-session -t "$arg" 2>/dev/null; then
       target="$arg"
     else
-      target="rtide-$(basename "$arg")"
+      target="${SESSION_PREFIX}$(basename "$arg")"
     fi
   else
     target=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
-    [[ "$target" == rtide-* ]] || target="rtide-$(basename "$(pwd)")"
+    [[ "$target" == "$SESSION_PREFIX"* ]] || target="${SESSION_PREFIX}$(basename "$(pwd)")"
   fi
   if ! tmux has-session -t "$target" 2>/dev/null; then
     echo "no workspace: $target" >&2
@@ -540,7 +586,7 @@ cmd_quit() {
     echo "not an rtide workspace: $target" >&2
     exit 1
   fi
-  rtide-mem sweep "$target" 2>/dev/null || true   # capture pending memories first
+  "$SELF_DIR/rtide-mem" sweep "$target" 2>/dev/null || true   # capture pending memories first
   tmux kill-session -t "$target"
   echo "quit: $target"
   exit 0
@@ -551,13 +597,20 @@ cmd_zoom() {
   local window pane active
   window=$(tmux display-message -p '#{window_id}' 2>/dev/null || true)
   [[ -n "$window" ]] || { echo "not in a tmux window"; exit 1; }
-  pane=$(tmux list-panes -t "$window" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
-    | awk -v r="$role" '$2==r{print $1; exit}')
+  if [[ "$role" == "current" ]]; then
+    pane=$(tmux display-message -p -t "$window" '#{pane_id}')
+  else
+    pane=$(tmux list-panes -t "$window" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+      | awk -v r="$role" '$2==r{print $1; exit}')
+  fi
   [[ -n "$pane" ]] || { echo "no '$role' pane in $window"; exit 1; }
   active=$(tmux display-message -p -t "$window" '#{pane_id}')
   # resize-pane -Z toggles: if another pane is zoomed, unzoom it first, then zoom the target
   if [[ "$(tmux display-message -p -t "$window" '#{window_zoomed_flag}')" == "1" ]]; then
     tmux resize-pane -Z -t "$active"
+    # Reapply the configured split after unzooming; this repairs any stale
+    # prompt height or tweb width left by prior popup-style pane moves.
+    "$0" refresh-window "$window" >/dev/null 2>&1 || true
     [[ "$active" == "$pane" ]] && exit 0   # was toggling the target off
   fi
   tmux resize-pane -Z -t "$pane"
@@ -584,7 +637,7 @@ EOF
     | awk -F '\t' -v d="$(realpath -m "$dir")" '$2=="agent" && $3==d{print $1; exit}')
   if [[ -n "$pane" ]]; then
     tmux send-keys -t "$pane" C-c
-    tmux send-keys -t "$pane" "rtide-agent $harness $provider $model $dir" Enter
+    tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir" Enter
     echo "restarted agent pane $pane"
   fi
   exit 0
@@ -681,7 +734,7 @@ cmd_config() {
 
 # Apply the current global config's layout to a running workspace's panes.
 cmd_refresh_window() {
-  local target="${2:-$(tmux display-message -p '#{window_id}' 2>/dev/null || true)}" agent nvim tweb workspace width tweb_w
+  local target="${2:-$(tmux display-message -p '#{window_id}' 2>/dev/null || true)}" agent nvim tweb workspace width tweb_w hidden
   [[ -n "$target" ]] && tmux display-message -p -t "$target" '#{window_id}' >/dev/null 2>&1 \
     || { echo "refresh-window: no RTIDE window" >&2; exit 1; }
   [[ -f "$CONFIG" ]] && source "$CONFIG"
@@ -699,6 +752,8 @@ cmd_refresh_window() {
   tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
   tmux resize-pane -t "$agent" -y "$agent_lines"
   tmux resize-pane -t "$tweb" -x "$tweb_w"
+  hidden=$(tmux show-options -w -v -t "$target" @rtide-nvim-hidden 2>/dev/null || true)
+  [[ "$hidden" == 1 ]] && tmux resize-pane -t "$nvim" -x 1
   workspace=$(tmux display-message -p -t "$tweb" '#{pane_current_path}')
   [[ -d "$workspace/.rtide" ]] && printf '%s\n' "$tweb" > "$workspace/.rtide/tweb-pane"
   echo "refresh-window: $target — tweb ${tweb_pct}%, prompt ${agent_lines}L"
@@ -823,32 +878,75 @@ cmd_layout_reset() {
 
 # Open the workspace quick-switcher menu (prefix+A). Interactive items run in a
 # display-popup so fzf pickers get a tty; the rest run directly via run-shell.
-#   rtide menu [session]   (no arg → current session)
+#   rtide menu [session] [window] [client]
 cmd_menu() {
-  local sess="${2:-$(tmux display-message -p '#{session_name}' 2>/dev/null || true)}" window="${3:-$(tmux display-message -p '#{window_id}' 2>/dev/null || true)}"
+  local sess="${2:-$(tmux display-message -p '#{session_name}' 2>/dev/null || true)}" window="${3:-$(tmux display-message -p '#{window_id}' 2>/dev/null || true)}" client="${4:-}"
+  local hidden nvim tweb width tweb_w workspace menu_expanded=0
+  local -a client_args=()
   [[ -n "$sess" ]] || { echo "menu: not in a tmux session — pass a session: rtide menu <session>" >&2; exit 1; }
+  [[ -z "$client" ]] || client_args=(-c "$client")
+  workspace=$(tmux show-options -w -v -t "$window" @rtide-workspace 2>/dev/null || true)
+  if [[ -z "$workspace" ]]; then
+    # Migrate sessions created before @rtide-workspace existed. Their editor
+    # pane was created in the launch directory and normally remains there.
+    nvim=$(tmux list-panes -t "$window" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+      | awk '$2=="nvim"{print $1; exit}')
+    [[ -z "$nvim" ]] || workspace=$(tmux display-message -p -t "$nvim" '#{pane_current_path}' 2>/dev/null || true)
+    [[ -n "$workspace" ]] && tmux set-option -w -t "$window" @rtide-workspace "$workspace"
+  fi
+  hidden=$(tmux show-options -w -v -t "$window" @rtide-nvim-hidden 2>/dev/null || true)
+  if [[ "$hidden" == 1 ]]; then
+    nvim=$(tmux list-panes -t "$window" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+      | awk '$2=="nvim"{print $1; exit}')
+    tweb=$(tmux list-panes -t "$window" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
+      | awk '$2=="tweb"{print $1; exit}')
+    if [[ -n "$nvim" && -n "$tweb" ]]; then
+      width=$(tmux display-message -p -t "$window" '#{window_width}')
+      # Reserve 40% for terminal-drawn menus while preserving the hidden flag.
+      # The EXIT cleanup collapses it again unless the chosen action explicitly
+      # showed the editor or reset the layout.
+      tweb_w=$(( width * 60 / 100 )); (( tweb_w < 10 )) && tweb_w=10
+      tmux resize-pane -t "$tweb" -x "$tweb_w"
+      menu_expanded=1
+      sleep 0.08
+      trap 'if [[ "$menu_expanded" == 1 ]] && [[ "$(tmux show-options -w -v -t "$window" @rtide-nvim-hidden 2>/dev/null || true)" == 1 ]]; then tmux resize-pane -t "$nvim" -x 1 2>/dev/null || true; fi' EXIT
+    fi
+  fi
   # Keep the menu inside the terminal-rendered left side. Centering it across
   # the full window can place half of it beneath tweb's graphical pane layer,
   # which visually clips the right side of the menu.
-  tmux display-menu -T "#[align=centre] RTIDE actions" -x 2 -y C \
-    "Switch workspace" r "display-popup -E -w 80% -h 70% 'rtide switch'" \
-    "Change agent…"    m "display-popup -E -w 80% -h 70% 'rtide agent'" \
-    "New workspace…"   n "display-popup -E -w 80% -h 70% 'rtide new'" \
-    "Fork conversation…" f "display-popup -E -w 80% -h 35% 'sh -c \"read -p \\\"Fork name (empty = automatic): \\\" n; rtide fork ${sess} ${window} \\\"\\\$n\\\"; echo; read -p done\"'" \
+  # Pin workspace pickers to the directory recorded when this RTIDE window was
+  # launched. tmux popups can otherwise inherit the server cwd (commonly
+  # $HOME), so `rtide new` may open and scan the wrong repository.
+  tmux display-menu "${client_args[@]}" -t "$window" \
+    -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
+    -H 'bg=#45475a,fg=#89dceb,bold' \
+    -T "#[align=centre,fg=#94e2d5,bold] RTIDE actions" -x 2 -y C -- \
+    "- WORKSPACES"      "" "" \
+    "Switch workspace" r "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD switch'" \
+    "Change agent…"    m "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 70% '$RTIDE_CMD agent'" \
+    "New workspace…"   n "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD new'" \
+    "Fork conversation…" f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 35% 'sh -c \"read -p \\\"Fork name (empty = automatic): \\\" n; $RTIDE_CMD fork ${sess} ${window} \\\"\\\$n\\\"; echo; read -p done\"'" \
     "" \
-    "Refresh layout"   R "run-shell 'rtide refresh-window ${window}'" \
-    "Reset pane layout" 0 "run-shell 'rtide layout-reset ${window}'" \
-    "Hide/show editor" e "run-shell 'rtide nvim toggle ${window}'" \
-    "Zoom tweb"        t "run-shell 'rtide zoom tweb'" \
-    "Zoom agent"       a "run-shell 'rtide zoom agent'" \
-    "Config…"          c "display-popup -E -w 70% -h 50% 'sh -c \"rtide config; echo; read -p done\"'" \
-    "Output history"   h "run-shell 'rtide history ${window}'" \
-    "Export output PDF" p "display-popup -E -w 72% -h 20% 'sh -c \"rtide pdf ${window}; echo; read -p done\"'" \
-    "Dictate prompt…"  v "display-popup -E -x 2 -w 38% -h 25% 'sh -c \"rtide-dictate #{pane_id}; rc=\\$?; [ \\$rc -eq 0 ] || read -p \\\"press Enter to close\\\"; exit \\$rc\"'" \
-    "Sweep memories"   s "run-shell 'rtide sweep'" \
+    "- LAYOUT & VIEW"   "" "" \
+    "Refresh layout"   R "run-shell '$RTIDE_CMD refresh-window ${window}'" \
+    "Reset pane layout" 0 "run-shell '$RTIDE_CMD layout-reset ${window}'" \
+    "Hide/show editor" e "run-shell '$RTIDE_CMD nvim toggle ${window}'" \
+    "Zoom tweb"        t "run-shell '$RTIDE_CMD zoom tweb'" \
+    "Zoom agent"       a "run-shell '$RTIDE_CMD zoom agent'" \
+    "Config…"          c "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 70% -h 50% 'sh -c \"$RTIDE_CMD config; echo; read -p done\"'" \
     "" \
+    "- OUTPUTS"         "" "" \
+    "Output history"   h "run-shell '$RTIDE_CMD history ${window}'" \
+    "Export output PDF" p "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 72% -h 20% 'sh -c \"$RTIDE_CMD pdf ${window}; echo; read -p done\"'" \
+    "" \
+    "- INPUT & MEMORY"  "" "" \
+    "Dictate prompt…"  v "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 38% -h 25% 'sh -c \"rtide-dictate #{pane_id}; rc=\$?; [ \$rc -eq 0 ] || read -p \\\"press Enter to close\\\"; exit \$rc\"'" \
+    "Sweep memories"   s "run-shell '$RTIDE_CMD sweep'" \
+    "" \
+    "- SESSION"         "" "" \
     "Detach"           d "detach-client" \
-    "Quit workspace"   q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit ${sess}'\""
+    "Quit workspace"   q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell '$RTIDE_CMD quit ${sess}'\""
   exit 0
 }
 
@@ -860,6 +958,11 @@ cmd_history() {
   nvim=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="nvim"{print $1; exit}')
   tweb=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="tweb"{print $1; exit}')
   [[ -n "$nvim" && -n "$tweb" ]] || { echo "history: incomplete RTIDE layout in $target" >&2; exit 1; }
+  # A popup (most notably the workspace switcher) can remain layered over the
+  # editor while the graphical tweb pane is still clickable. Dismiss it before
+  # changing the output view so the editor is revealed rather than appearing
+  # to have been replaced by popup content.
+  tmux display-popup -C -t "$nvim" 2>/dev/null || true
   dir=$(tmux display-message -p -t "$nvim" '#{pane_current_path}')
   page="$dir/.tweb/history.html"
   [[ -f "$page" ]] || { echo "history: no completed outputs yet" >&2; exit 1; }
@@ -964,7 +1067,10 @@ cmd_slash_menu() {
     tmux send-keys -t "$pane" -l '/'
     exit 0
   fi
-  tmux display-menu -t "$pane" -T "#[align=centre] Prompt commands" -x 2 -y C \
+  tmux display-menu -t "$pane" -s 'bg=#202334,fg=#cdd6f4' \
+    -S 'bg=#181825,fg=#cba6f7' -H 'bg=#45475a,fg=#89dceb,bold' \
+    -T "#[align=centre,fg=#94e2d5,bold] Prompt commands" -x 2 -y C \
+    "Fork conversation…" f "send-keys -t '$pane' -l '/fork '" \
     "Steer current turn…" s "send-keys -t '$pane' -l '/steer '" \
     "Interrupt current turn" i "send-keys -t '$pane' -l '/interrupt'; send-keys -t '$pane' Enter" \
     "Queue count" q "send-keys -t '$pane' -l '/queue'; send-keys -t '$pane' Enter" \
@@ -979,8 +1085,58 @@ cmd_voice_popup() {
   # A popup created inside the MouseUp event can inherit that event and close
   # immediately. Let the click finish before attaching the popup to its client.
   sleep 0.15
-  tmux display-popup -t "$client" -E -x 2 -w 38% -h 25% \
+  tmux display-popup -t "$client" -E -b rounded \
+    -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
+    -x 2 -w 38% -h 25% \
     "sh -c 'rtide-dictate \"$pane\"; rc=\$?; [ \$rc -eq 0 ] || read -p \"press Enter to close\"; exit \$rc'"
+  exit 0
+}
+
+cmd_pane_popup() {
+  local client="${2:-}" helper="$HOME/.tmux/pane-popup-toggle.sh"
+  local active pane role window line
+  [[ -x "$helper" ]] || { echo "pane-popup: helper not found: $helper" >&2; exit 1; }
+
+  # A second prefix+z is issued from the nested popup client. Let the original
+  # helper restore immediately; the first wrapper invocation will perform the
+  # RTIDE layout repair after display-popup returns.
+  active=$(tmux show-options -gqv @floating_pane_popup_active 2>/dev/null || true)
+  if [[ "$active" == 1 || "$active" == restoring ]]; then
+    exec "$helper" client-toggle "$client"
+  fi
+
+  [[ -n "$client" ]] \
+    && pane=$(tmux display-message -p -c "$client" '#{pane_id}' 2>/dev/null || true)
+  [[ -n "${pane:-}" ]] || pane=$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)
+  [[ -n "$pane" ]] || { echo "pane-popup: no active pane" >&2; exit 1; }
+  role=$(tmux display-message -p -t "$pane" '#{@rtide-role}' 2>/dev/null || true)
+  window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
+
+  # Once the pane has moved into the popup session, refresh surfaces whose UI
+  # depends on pane geometry. nvim and the pane-bound tweb process follow the
+  # stable pane ID naturally; an idle readline prompt needs an explicit redraw.
+  # Do not call `tweb pin` here: it operates on global floating-browser state
+  # and can import an unrelated page into this workspace's tweb pane.
+  case "$role" in
+    agent)
+      (sleep 0.2
+       line=$(tmux capture-pane -p -t "$pane" -S -2 2>/dev/null | tail -1)
+       [[ "$line" =~ ^(\>|╰─❯) ]] && tmux send-keys -t "$pane" C-l) &
+      ;;
+  esac
+
+  "$helper" client-toggle "$client"
+
+  # The pane has returned. Restore RTIDE's configured proportions and refresh
+  # geometry-dependent surfaces without changing the selected pane.
+  if [[ "$role" =~ ^(nvim|tweb|agent)$ ]] \
+      && tmux display-message -p -t "$window" '#{window_id}' >/dev/null 2>&1; then
+    "$0" refresh-window "$window" >/dev/null 2>&1 || true
+    if [[ "$role" == agent ]]; then
+      line=$(tmux capture-pane -p -t "$pane" -S -2 2>/dev/null | tail -1)
+      [[ "$line" =~ ^(\>|╰─❯) ]] && tmux send-keys -t "$pane" C-l
+    fi
+  fi
   exit 0
 }
 
@@ -993,17 +1149,25 @@ bind_if_free() {
   fi
 }
 
+bind_pane_popup() {
+  # Preserve the user's floating prefix+z interaction while adding RTIDE's
+  # geometry repair around it. Non-RTIDE panes pass through the wrapper.
+  tmux bind-key z run-shell "$RTIDE_CMD pane-popup '#{client_name}'"
+}
+
 bind_slash_menu() {
   if ! tmux list-keys -T root 2>/dev/null | awk '$1=="bind-key" && $4=="/"{found=1} END{exit !found}'; then
     tmux bind-key -n / if-shell -F '#{==:#{@rtide-role},agent}' \
-      "run-shell 'rtide slash-menu #{pane_id}'" "send-keys /"
+      "run-shell '$RTIDE_CMD slash-menu #{pane_id}'" "send-keys /"
   fi
 }
 
 bind_dictation() {
   tmux set-option -s extended-keys on 2>/dev/null || true
   tmux set-option -s extended-keys-format csi-u 2>/dev/null || true
-  tmux bind-key v display-popup -E -x 2 -w 38% -h 25% \
+  tmux bind-key v display-popup -E -b rounded \
+    -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
+    -x 2 -w 38% -h 25% \
     "sh -c 'rtide-dictate \"#{pane_id}\"; rc=\$?; [ \$rc -eq 0 ] || read -p \"press Enter to close\"; exit \$rc'"
 }
 
@@ -1014,12 +1178,14 @@ bind_voice_click() {
   tmux bind-key -n MouseDown1Pane "select-pane -t = ; send-keys -M"
   tmux bind-key -n MouseUp1Pane if-shell \
     "test '#{@rtide-role}' = agent && test '#{mouse_x}' -ge \$((#{pane_left}+#{pane_width}-12))" \
-    "run-shell -b 'rtide voice-popup #{pane_id} #{client_name}'" \
+    "run-shell -b '$RTIDE_CMD voice-popup #{pane_id} #{client_name}'" \
     'send-keys -M'
 }
 
 case "${1:-}" in
-  setup)  setup_wizard; exit 0 ;;
+  --version|-V) cmd_version; exit 0 ;;
+  version) cmd_version "${2:-}"; exit 0 ;;
+  setup)  cmd_setup; exit 0 ;;
   doctor) cmd_doctor; exit 0 ;;
   new)    cmd_new ;;
   fork)   cmd_fork "$@"; exit 0 ;;
@@ -1040,12 +1206,13 @@ case "${1:-}" in
   history) cmd_history "$@" ;;
   pdf)    cmd_pdf "$@" ;;
   voice-popup) cmd_voice_popup "$@" ;;
+  pane-popup) cmd_pane_popup "$@" ;;
   slash-menu) cmd_slash_menu "$@" ;;
   matrix) "$PROVIDER_BIN" matrix; exit 0 ;;
 esac
 
 # Load config (run wizard on first run)
-[[ -f "$CONFIG" ]] || setup_wizard
+[[ -f "$CONFIG" ]] || cmd_setup
 source "$CONFIG"
 
 # legacy: agent= → harness=
@@ -1070,6 +1237,9 @@ for f in AGENTS.md CLAUDE.md; do
 done
 mkdir -p "$DIR/.tweb"
 [[ -f "$DIR/.tweb/template.html" ]] || cp "$TWEB_DIR/template.html" "$DIR/.tweb/template.html"
+[[ -f "$DIR/.tweb/DESIGN_PLAYBOOK.md" ]] || cp "$TWEB_DIR/DESIGN_PLAYBOOK.md" "$DIR/.tweb/DESIGN_PLAYBOOK.md"
+mkdir -p "$DIR/.tweb/assets"
+[[ -f "$DIR/.tweb/assets/rtide-mark.png" ]] || cp "$TWEB_DIR/assets/rtide-mark.png" "$DIR/.tweb/assets/rtide-mark.png"
 grep -q '^\.tweb/$' "$DIR/.gitignore" 2>/dev/null || echo '.tweb/' >> "$DIR/.gitignore"
 grep -q '^exports/$' "$DIR/.gitignore" 2>/dev/null || echo 'exports/' >> "$DIR/.gitignore"
 grep -q '^\.rtide/\*$' "$DIR/.gitignore" 2>/dev/null || {
@@ -1089,7 +1259,7 @@ if ! git -C "$DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
     commit --allow-empty -m "Initialize RTIDE workspace" >/dev/null
 fi
 
-S="rtide-$(basename "$DIR")"
+S="${SESSION_PREFIX}$(basename "$DIR")"
 if tmux has-session -t "$S" 2>/dev/null; then
   resume_session "$S" \
     || echo "could not open $S — attach with: tmux attach -t $S" >&2
@@ -1127,7 +1297,7 @@ fi
 
 # The agent pane runs the minimal input-box wrapper (rtide-agent), which
 # invokes the harness non-interactively per request and renders to tweb.
-AGENT_CMD="rtide-agent $harness $provider $model $DIR"
+AGENT_CMD="$RTIDE_AGENT_CMD $harness $provider $model $DIR"
 
 # Build the layout with pane IDs (index-agnostic — respects base-index settings).
 # Each pane gets a pane-scoped @rtide-role option (survives title changes by apps).
@@ -1146,10 +1316,11 @@ fi
 [[ "$START_H" =~ ^[0-9]+$ ]] || START_H=24
 tmux set-option -g mouse on
 tmux new-session -d -x "$START_W" -y "$START_H" -s "$S" -n work -c "$DIR"
+tmux set-option -w -t "$S:work" @rtide-workspace "$DIR"
 NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
 tmux select-pane -t "$NVIM_PANE" -T nvim
-tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim --listen '$DIR/.rtide/nvim.sock'" Enter
+tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim --listen '$DIR/.rtide/nvim.sock' '$DIR'" Enter
 tmux split-window -v -t "$NVIM_PANE" -l "$agent_lines" -c "$DIR"
 AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
 tmux set-option -p -t "$AGENT_PANE" @rtide-role agent
@@ -1205,15 +1376,16 @@ if ! (( READY_NVIM && READY_TWEB && READY_AGENT )); then
     "$READY_NVIM" "$READY_TWEB" "$READY_AGENT" >&2
 fi
 # Global bindings that resolve panes by title in the current session at press-time
-bind_if_free t "run-shell 'rtide zoom tweb'"
-bind_if_free a "run-shell 'rtide zoom agent'"
+bind_if_free t "run-shell '$RTIDE_CMD zoom tweb'"
+bind_if_free a "run-shell '$RTIDE_CMD zoom agent'"
+bind_pane_popup
 bind_dictation
 bind_voice_click
-bind_if_free r "run-shell 'rtide switch'"
-bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell 'rtide quit #{session_name}'\""
-bind_if_free R "run-shell 'rtide refresh-window #{window_id}'"
-bind_if_free A "run-shell 'rtide menu #{session_name} #{window_id}'"
-bind_if_free e "run-shell 'rtide nvim toggle #{window_id}'"
+bind_if_free r "run-shell '$RTIDE_CMD switch'"
+bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell '$RTIDE_CMD quit #{session_name}'\""
+bind_if_free R "run-shell '$RTIDE_CMD refresh-window #{window_id}'"
+  tmux bind-key A run-shell "$RTIDE_CMD menu '#{session_name}' '#{window_id}' '#{client_name}'"
+bind_if_free e "run-shell '$RTIDE_CMD nvim toggle #{window_id}'"
 bind_slash_menu
 install_session_hooks "$S"
 tmux select-window -t "$S:work"

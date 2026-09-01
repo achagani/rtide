@@ -39,7 +39,7 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 - Use a deliberate type scale, restrained content-led palette, and consistent
   spacing system. Small details—rules, labels, captions, legends, hover/focus
   states, and transitions—should reinforce the chosen visual language.
-- Read `.tweb/DESIGN_PLAYBOOK.md` before creating a substantive artifact.
+- Read `~/rtide/share/DESIGN_PLAYBOOK.md` before creating a substantive artifact.
   Treat `template.html` as an accessible technical foundation, not a visual theme
   to copy unchanged. Check the result at the actual tweb pane size before rendering.
 
@@ -56,21 +56,13 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
    those commands can create a duplicate browser pane. Always use `tweb-render`.
 5. Live updates: edit the HTML and run `tweb-render` again; it keeps the update in
    the current workspace.
-6. Use `.tweb/template.html` as a technical foundation and the design
+6. Use `~/rtide/share/template.html` as a technical foundation and the design
    playbook for art direction; adapt both to the subject instead of cloning a theme.
 
 ## Tools
 - `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb
 - `tweb-run <cmd>` — run a program, render its output in tweb (exit code, duration)
 - `tweb mcp` tools — navigate, click, fill, eval, snapshot (drive the browser)
-
-## Development isolation
-- When working on RTIDE itself, do feature development in a dedicated sibling Git
-  worktree and branch, not in the primary `~/rtide` checkout. Create one with
-  `git worktree add ../rtide-<topic> -b <topic-branch> main`, launch RTIDE from
-  that worktree, and verify the location with `git status --short --branch` and
-  `git worktree list` before editing. Reserve the primary checkout for release
-  integration, installation, and emergency recovery.
 
 ## Files in the editor
 - After creating or editing a file, run `rtide-open <path>` to open it in the
@@ -80,6 +72,30 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 ## Shell
 - `:terminal` in nvim opens the configured hip shell (VS Code-style, on demand)
 - `python script.py | tweb-render -` — pipe any command's output into tweb
+
+## Source changes and installation
+- Do feature development in a dedicated sibling Git worktree and branch, not in
+  the primary `~/rtide` checkout. Create one from the primary checkout with
+  `git worktree add ../rtide-<topic> -b <topic-branch> main`, launch RTIDE from
+  that worktree, and keep the primary checkout for release integration,
+  installation, and emergency recovery. Before editing, confirm `git status
+  --short --branch` and `git worktree list` identify the intended worktree.
+- This repository is the RTIDE source checkout; editing `bin/`, `share/`, or other
+  project files is not by itself a completed laptop installation.
+- Runtime source changes must increment the source-controlled `VERSION` exactly
+  once per change set. Use `make bump-patch` by default, or `bump-minor` /
+  `bump-major` when the compatibility impact warrants it. Reinstalling unchanged
+  source must not change the version.
+- Use `make dev` to run the editable checkout without changing the installed release.
+- After changing RTIDE source, run `make install`. This is the required end-to-end
+  pipeline: syntax checks, the complete test suite, an immutable versioned install,
+  atomic activation, and verification of the exact tested payload.
+- Use `make build` when validation and tests are requested without installation.
+- Use `make stage DESTDIR=<path> PREFIX=/usr` for package-manager staging; it must
+  not modify user configuration, PATH, integrations, or the active user release.
+- Use `make verify-install` to check the installed links without modifying them.
+- Do not report a change as installed unless `make install` completed successfully.
+  If only source or tests were changed, state that limitation clearly.
 
 ## Memory (auto)
 - At session start, read the memory index: `rtide-mem list` (or read `MEMORY.md`)

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Stable per-user RTIDE launcher and rollback manager.
+set -euo pipefail
+
+INSTALL_ROOT="${RTIDE_INSTALL_ROOT:-$HOME/.local/lib/rtide}"
+VERSIONS_DIR="$INSTALL_ROOT/versions"
+CURRENT="$INSTALL_ROOT/current"
+
+version_key() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+current_version() {
+  [[ -L "$CURRENT" ]] || return 0
+  basename "$(readlink "$CURRENT")"
+}
+
+list_versions() {
+  local active version found=0
+  active=$(current_version)
+  [[ -d "$VERSIONS_DIR" ]] || { echo "no RTIDE releases installed"; return; }
+  while IFS= read -r version; do
+    [[ -n "$version" ]] || continue
+    found=1
+    if [[ "$version" == "$active" ]]; then
+      printf '* %s\n' "$version"
+    else
+      printf '  %s\n' "$version"
+    fi
+  done < <(find "$VERSIONS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -Vr)
+  (( found )) || echo "no RTIDE releases installed"
+}
+
+activate() {
+  local version="${1:-}" release tmp reported
+  version_key "$version" || { echo "usage: rtide use <major.minor.patch>" >&2; exit 2; }
+  release="$VERSIONS_DIR/$version"
+  [[ -x "$release/bin/rtide" && -f "$release/MANIFEST.sha256" ]] \
+    || { echo "RTIDE release is incomplete: $version" >&2; exit 1; }
+  (cd "$release" && sha256sum -c MANIFEST.sha256 >/dev/null) \
+    || { echo "RTIDE release manifest failed: $version" >&2; exit 1; }
+  reported=$("$release/bin/rtide" --version)
+  [[ "$reported" == "rtide $version" ]] \
+    || { echo "RTIDE release failed validation: $reported" >&2; exit 1; }
+  tmp="$INSTALL_ROOT/.current.$$"
+  ln -s "versions/$version" "$tmp"
+  mv -Tf "$tmp" "$CURRENT"
+  echo "active RTIDE: $version"
+}
+
+case "${1:-}" in
+  versions) list_versions; exit 0 ;;
+  use) activate "${2:-}"; exit 0 ;;
+esac
+
+if [[ ! -x "$CURRENT/bin/rtide" ]]; then
+  echo "RTIDE has no active release under $INSTALL_ROOT" >&2
+  echo "Install one with: make install" >&2
+  exit 1
+fi
+exec "$CURRENT/bin/rtide" "$@"

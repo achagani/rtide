@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Run RTIDE entirely from the editable source checkout.
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+DIR=$(realpath -m "${1:-.}")
+shift || true
+if [[ "${RTIDE_DEV_STATE:-isolated}" == shared ]]; then
+  CONFIG_DIR="$HOME/.rtide"
+else
+  CONFIG_DIR="${RTIDE_DEV_CONFIG_DIR:-$HOME/.rtide-dev}"
+fi
+
+installed_session="rtide-$(basename "$DIR")"
+if tmux has-session -t "$installed_session" 2>/dev/null; then
+  echo "installed RTIDE already has this workspace open: $installed_session" >&2
+  echo "close it before starting the development version" >&2
+  exit 1
+fi
+
+export PATH="$ROOT/bin:$PATH"
+export RTIDE_ROOT="$ROOT"
+export RTIDE_CONFIG_DIR="$CONFIG_DIR"
+export RTIDE_SESSION_PREFIX="rtide-dev-"
+if (( $# )); then
+  exec "$ROOT/bin/rtide" "$@"
+fi
+exec "$ROOT/bin/rtide" "$DIR"

@@ -26,6 +26,7 @@ import threading
 import urllib.parse
 
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
+RTIDE_BIN = os.path.join(SELF_DIR, "rtide")
 PROVIDER_BIN = os.path.join(SELF_DIR, "rtide-provider")
 TWEB_RENDER = os.path.join(SELF_DIR, "tweb-render")
 
@@ -144,6 +145,30 @@ def managed_tweb_pane():
     matches = [line.split()[0] for line in panes.stdout.splitlines()
                if line.split()[1:] == ["tweb"]]
     return matches[0] if len(matches) == 1 else None
+
+
+def fork_conversation(prompt):
+    """Create an isolated fork window and submit prompt after it is ready."""
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        return False, "fork: prompt is not attached to a tmux pane"
+    location = subprocess.run(
+        ["tmux", "display-message", "-p", "-t", pane,
+         "#{session_name}\t#{window_id}"],
+        capture_output=True, text=True,
+    )
+    fields = location.stdout.strip().split("\t", 1)
+    if location.returncode != 0 or len(fields) != 2:
+        return False, "fork: could not resolve the current workspace window"
+    session, window = fields
+    result = subprocess.run(
+        [RTIDE_BIN, "fork", session, window, "", prompt],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "fork failed"
+        return False, message
+    return True, result.stdout.strip()
 
 
 def current_tweb_url(pane):
@@ -906,7 +931,25 @@ def main():
         if not req:
             continue
         if req == "/help":
-            status("plain text queues while working · /steer TEXT · /interrupt · /resend · /queue")
+            status("/fork PROMPT · plain text queues while working · /steer TEXT · /interrupt · /resend · /queue")
+            continue
+        if req == "/fork":
+            status("fork: add a prompt after /fork")
+            continue
+        if req.startswith("/fork "):
+            fork_prompt = req[6:].strip()
+            if not fork_prompt:
+                status("fork: add a prompt after /fork")
+                continue
+            clear()
+            status(f"{MAGENTA}◆{RESET} creating isolated conversation fork…")
+            ok, message = fork_conversation(fork_prompt)
+            if not ok:
+                clear()
+                error_status(message)
+            else:
+                clear()
+                idle_status()
             continue
         if req == "/queue":
             status(f"queue: {len(pending)}")

@@ -107,6 +107,20 @@ class AgentStatusTests(unittest.TestCase):
                 "Next turn",
             )
 
+    def test_fork_command_targets_current_window_with_literal_prompt(self):
+        location = mock.Mock(returncode=0, stdout="rtide-demo\t@7\n")
+        launched = mock.Mock(returncode=0, stdout="fork: demo-fork-1\n", stderr="")
+        with mock.patch.dict(os.environ, {"TMUX_PANE": "%9"}):
+            with mock.patch.object(AGENT.subprocess, "run",
+                                   side_effect=[location, launched]) as run:
+                ok, _ = AGENT.fork_conversation("don't expand $HOME or `pwd`")
+        self.assertTrue(ok)
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            [AGENT.RTIDE_BIN, "fork", "rtide-demo", "@7", "",
+             "don't expand $HOME or `pwd`"],
+        )
+
     def test_codex_command_event_uses_agent_payload(self):
         event = {
             "type": "item.started",

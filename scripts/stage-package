@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Stage a side-effect-free package-manager filesystem tree.
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+SOURCE_VERSION=$(tr -d '[:space:]' < "$ROOT/VERSION")
+PAYLOAD="${1:-$ROOT/build/rtide-$SOURCE_VERSION}"
+VERSION=$(tr -d '[:space:]' < "$PAYLOAD/VERSION")
+DESTDIR="${DESTDIR:?DESTDIR is required for package staging}"
+PREFIX="${PREFIX:-/usr/local}"
+LIB_DIR="$DESTDIR$PREFIX/lib/rtide"
+BIN_DIR="$DESTDIR$PREFIX/bin"
+COMMANDS=(rtide rtide-provider rtide-mcp rtide-mem rtide-agent rtide-dictate rtide-open tweb-render tweb-run)
+
+python3 "$ROOT/scripts/package-tool" verify "$PAYLOAD" >/dev/null
+mkdir -p "$LIB_DIR" "$BIN_DIR"
+cp -a "$PAYLOAD/." "$LIB_DIR/"
+for command in "${COMMANDS[@]}"; do
+  ln -sfn "../lib/rtide/bin/$command" "$BIN_DIR/$command"
+done
+echo "staged rtide $VERSION under $DESTDIR$PREFIX"

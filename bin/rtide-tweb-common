@@ -20,16 +20,16 @@ rtide_tweb_prepare() {
   if [[ -z "$anchor_pane" ]]; then
     # Agent harnesses may intentionally strip TMUX/TMUX_PANE from commands.
     # Recover the workspace's registered browser pane from the command cwd.
-    local root="${RTIDE_WORKSPACE:-$PWD}" registration
-    root=$(realpath "$root" 2>/dev/null || printf '%s' "$root")
-    while [[ -n "$root" && "$root" != / ]]; do
-      registration="$root/.rtide/tweb-pane"
+    local workspace_root="${RTIDE_WORKSPACE:-$PWD}" registration
+    workspace_root=$(realpath "$workspace_root" 2>/dev/null || printf '%s' "$workspace_root")
+    while [[ -n "$workspace_root" && "$workspace_root" != / ]]; do
+      registration="$workspace_root/.rtide/tweb-pane"
       if [[ -r "$registration" ]]; then
         read -r anchor_pane < "$registration" || true
         break
       fi
-      root=${root%/*}
-      [[ -n "$root" ]] || root=/
+      workspace_root=${workspace_root%/*}
+      [[ -n "$workspace_root" ]] || workspace_root=/
     done
   fi
 
@@ -66,27 +66,27 @@ rtide_tweb_prepare() {
 }
 
 rtide_tweb_queue() {
-  local url="$1" float="${2:-0}" root="${RTIDE_WORKSPACE:-$PWD}" request tmp
-  root=$(realpath "$root" 2>/dev/null || printf '%s' "$root")
-  while [[ -n "$root" && "$root" != / ]]; do
-    if [[ -r "$root/.rtide/tweb-pane" ]]; then
-      request="$root/.rtide/render-request"
+  local url="$1" float="${2:-0}" queue_root="${RTIDE_WORKSPACE:-$PWD}" request tmp
+  queue_root=$(realpath "$queue_root" 2>/dev/null || printf '%s' "$queue_root")
+  while [[ -n "$queue_root" && "$queue_root" != / ]]; do
+    if [[ -r "$queue_root/.rtide/tweb-pane" ]]; then
+      request="$queue_root/.rtide/render-request"
       tmp="$request.$$"
       printf '%s\n%s\n' "$float" "$url" > "$tmp" || return 1
       mv -f -- "$tmp" "$request" || return 1
       printf 'queued render for RTIDE tweb pane\n'
       return 0
     fi
-    root=${root%/*}
-    [[ -n "$root" ]] || root=/
+    queue_root=${queue_root%/*}
+    [[ -n "$queue_root" ]] || queue_root=/
   done
   return 1
 }
 
 rtide_tweb_show() {
-  local url="$1" float="${2:-0}"
+  local url="$1" float="${2:-0}" request_root="${RTIDE_WORKSPACE:-$PWD}"
   if ! rtide_tweb_prepare; then
-    if [[ "${RTIDE_TWEB_FAILURE:-}" == missing ]] && rtide_tweb_queue "$url" "$float"; then
+    if [[ "${RTIDE_TWEB_FAILURE:-}" == missing ]] && RTIDE_WORKSPACE="$request_root" rtide_tweb_queue "$url" "$float"; then
       return 0
     fi
     return 2
@@ -116,7 +116,7 @@ rtide_tweb_show() {
   fi
 
   if [[ ! -t 0 || ! -t 1 ]]; then
-    if rtide_tweb_queue "$url" "$float"; then
+    if RTIDE_WORKSPACE="$request_root" rtide_tweb_queue "$url" "$float"; then
       return 0
     fi
     printf 'tweb output error: no RTIDE tweb pane; refusing a blocking browser in a noninteractive shell\n' >&2

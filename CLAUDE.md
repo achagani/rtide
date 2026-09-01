@@ -39,7 +39,7 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 - Use a deliberate type scale, restrained content-led palette, and consistent
   spacing system. Small details—rules, labels, captions, legends, hover/focus
   states, and transitions—should reinforce the chosen visual language.
-- Read `.tweb/DESIGN_PLAYBOOK.md` before creating a substantive artifact.
+- Read `~/rtide/share/DESIGN_PLAYBOOK.md` before creating a substantive artifact.
   Treat `template.html` as an accessible technical foundation, not a visual theme
   to copy unchanged. Check the result at the actual tweb pane size before rendering.
 
@@ -56,21 +56,13 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
    those commands can create a duplicate browser pane. Always use `tweb-render`.
 5. Live updates: edit the HTML and run `tweb-render` again; it keeps the update in
    the current workspace.
-6. Use `.tweb/template.html` as a technical foundation and the design
+6. Use `~/rtide/share/template.html` as a technical foundation and the design
    playbook for art direction; adapt both to the subject instead of cloning a theme.
 
 ## Tools
 - `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb
 - `tweb-run <cmd>` — run a program, render its output in tweb (exit code, duration)
 - `tweb mcp` tools — navigate, click, fill, eval, snapshot (drive the browser)
-
-## Development isolation
-- When working on RTIDE itself, do feature development in a dedicated sibling Git
-  worktree and branch, not in the primary `~/rtide` checkout. Create one with
-  `git worktree add ../rtide-<topic> -b <topic-branch> main`, launch RTIDE from
-  that worktree, and verify the location with `git status --short --branch` and
-  `git worktree list` before editing. Reserve the primary checkout for release
-  integration, installation, and emergency recovery.
 
 ## Files in the editor
 - After creating or editing a file, run `rtide-open <path>` to open it in the

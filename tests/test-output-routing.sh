@@ -16,6 +16,7 @@ chmod +x "$FIXTURES/tmux" "$FIXTURES/tweb"
 export PATH="$FIXTURES:/usr/bin:/bin"
 export HOME="$TEST_TMP/home"
 export FAKE_TWEB_LOG="$TEST_TMP/tweb.log"
+unset RTIDE_TWEB_MODE RTIDE_TWEB_PANE RTIDE_TWEB_SESSION_HINT RTIDE_WORKSPACE
 mkdir -p "$HOME" "$TEST_TMP/pages"
 printf '<h1>route me</h1>\n' > "$TEST_TMP/pages/page with spaces.html"
 
@@ -107,10 +108,15 @@ fi
 
 # A noninteractive caller outside RTIDE must fail clearly instead of blocking in tweb open.
 reset_log
-if env -u TMUX -u TMUX_PANE "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html" \
-  </dev/null >/dev/null 2>/dev/null; then
-  fail 'noninteractive standalone render unexpectedly succeeded'
-fi
+(
+  cd "$TEST_TMP"
+  if env -u TMUX -u TMUX_PANE -u RTIDE_TWEB_MODE -u RTIDE_TWEB_PANE \
+    -u RTIDE_TWEB_SESSION_HINT -u RTIDE_WORKSPACE \
+    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html" \
+    </dev/null >/dev/null 2>/dev/null; then
+    fail 'noninteractive standalone render unexpectedly succeeded'
+  fi
+)
 [[ ! -s "$FAKE_TWEB_LOG" ]] || fail 'noninteractive fallback invoked tweb'
 
 # Piped content must be escaped and written to a session-scoped file.

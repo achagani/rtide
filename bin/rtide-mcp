@@ -4,8 +4,16 @@
 # `mcp add`, so its config JSON is merged directly.
 set -euo pipefail
 
-BIN="$HOME/.local/bin"
 SERVERS=(tweb rtide-mem)
+SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || realpath "$0")
+SELF_DIR=$(dirname "$SCRIPT_PATH")
+
+server_command() {
+  case "$1" in
+    tweb) command -v tweb ;;
+    rtide-mem) printf '%s\n' "$SELF_DIR/rtide-mem" ;;
+  esac
+}
 
 registered() { # $1=harness $2=server
   case "$1" in
@@ -18,10 +26,11 @@ registered() { # $1=harness $2=server
 # --- Claude ---
 if command -v claude >/dev/null 2>&1; then
   for s in "${SERVERS[@]}"; do
+    command=$(server_command "$s")
     if registered claude "$s"; then
       echo "claude: $s already registered"
     else
-      claude mcp add "$s" "$BIN/$s" mcp >/dev/null 2>&1 \
+      claude mcp add "$s" "$command" mcp >/dev/null 2>&1 \
         && echo "claude: added $s" || echo "claude: FAILED to add $s"
     fi
   done
@@ -30,10 +39,11 @@ fi
 # --- Codex ---
 if command -v codex >/dev/null 2>&1; then
   for s in "${SERVERS[@]}"; do
+    command=$(server_command "$s")
     if registered codex "$s"; then
       echo "codex: $s already registered"
     else
-      codex mcp add "$s" -- "$BIN/$s" mcp >/dev/null 2>&1 \
+      codex mcp add "$s" -- "$command" mcp >/dev/null 2>&1 \
         && echo "codex: added $s" || echo "codex: FAILED to add $s"
     fi
   done
@@ -42,10 +52,11 @@ fi
 # --- Hermes ---
 if command -v hermes >/dev/null 2>&1; then
   for s in "${SERVERS[@]}"; do
+    command=$(server_command "$s")
     if registered hermes "$s"; then
       echo "hermes: $s already registered"
     else
-      printf 'Y\n' | hermes mcp add "$s" --command "$BIN/$s" --args mcp >/dev/null 2>&1 \
+      printf 'Y\n' | hermes mcp add "$s" --command "$command" --args mcp >/dev/null 2>&1 \
         && echo "hermes: added $s" || echo "hermes: FAILED to add $s"
     fi
   done
@@ -55,16 +66,19 @@ fi
 if command -v opencode >/dev/null 2>&1; then
   OPENCODE_CFG="$HOME/.config/opencode/opencode.json"
   mkdir -p "$(dirname "$OPENCODE_CFG")"
-  python3 - "$OPENCODE_CFG" "${SERVERS[@]}" <<'PY'
+  commands=()
+  for s in "${SERVERS[@]}"; do commands+=("$(server_command "$s")"); done
+  python3 - "$OPENCODE_CFG" "${SERVERS[0]}" "${commands[0]}" "${SERVERS[1]}" "${commands[1]}" <<'PY'
 import sys, os, json
-cfg, servers = sys.argv[1], sys.argv[2:]
+cfg, pairs = sys.argv[1], sys.argv[2:]
+servers = dict(zip(pairs[::2], pairs[1::2]))
 data = {}
 if os.path.exists(cfg):
     with open(cfg) as f:
         data = json.load(f)
 mcp = data.setdefault("mcp", {})
-for s in servers:
-    mcp[s] = {"type": "stdio", "command": os.path.expanduser("~/.local/bin/" + s), "args": ["mcp"], "enabled": True}
+for s, command in servers.items():
+    mcp[s] = {"type": "stdio", "command": command, "args": ["mcp"], "enabled": True}
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")

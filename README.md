@@ -82,11 +82,11 @@ curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | ba
 git clone https://github.com/achagani/rtide ~/rtide && ~/rtide/install.sh
 ```
 
-The installer clones the source to `~/rtide`, creates the runtime dir `~/.rtide/`
-(`config` + `memory/`), symlinks helpers into `~/.local/bin/`, wires `~/.local/bin`
-onto PATH for fish (`fish_add_path`), installs the user-level `~/.claude/CLAUDE.md`
-convention, wires the `tweb` + `rtide-mem` MCP servers into every installed harness,
-and runs `tweb doctor --fix`. Re-running is safe (idempotent).
+The installer builds and tests the source, copies an immutable release under
+`~/.local/lib/rtide/versions/`, and atomically activates it through `current`.
+`~/.local/bin/rtide` is a stable launcher that also supports rollback. Runtime
+configuration and memory remain under `~/.rtide/`. Re-running the same version and
+contents is safe; changed contents require a version bump.
 
 **Dependencies** (checked by `rtide doctor`): `tweb`, `tmux` ≥ 3.3, `nvim`, a
 terminal (`kitty` or `ghostty`), and at least one agent. The default shell **fish**
@@ -205,8 +205,7 @@ one-liners that the sweep auto-persists to memory.
 
 ## Layout
 
-Source and runtime are separated: `~/rtide/` is the git repo (source), `~/.rtide/`
-is created by the installer and holds config + data.
+Source, installed releases, and runtime state are separate.
 
 ```
 ~/rtide/                  # source (git repo)
@@ -222,6 +221,15 @@ is created by the installer and holds config + data.
 └── share/AGENTS.md       # convention source
     share/template.html   # report template
 
+~/.local/lib/rtide/
+├── current -> versions/0.1.1
+└── versions/
+    └── 0.1.1/            # immutable tested payload
+
+~/.local/bin/
+├── rtide                 # stable launcher + rollback manager
+└── rtide-agent -> ../lib/rtide/current/bin/rtide-agent
+
 ~/.rtide/                 # runtime (created by install.sh, not in git)
 ├── config                # global provider/harness/model + layout settings
 └── memory/               # global memory store
@@ -230,6 +238,63 @@ is created by the installer and holds config + data.
 Per-project (seeded automatically): `AGENTS.md`, `CLAUDE.md`, `.tweb/` (gitignored),
 `.rtide/agent` (per-workspace provider/harness/model override), `.rtide/memory/`
 (committed).
+
+### Development workflow
+
+Develop RTIDE features in an isolated sibling worktree rather than directly in
+the primary checkout:
+
+```bash
+cd ~/rtide
+git worktree add ../rtide-my-feature -b my-feature main
+cd ../rtide-my-feature
+git status --short --branch
+git worktree list
+make dev DIR=.
+```
+
+Keep `~/rtide` as the stable release-integration and recovery checkout. Run and
+test the editable source from the feature worktree; merge reviewed work back into
+`main`, then install from the primary checkout. Remove a finished worktree with
+`git worktree remove ../rtide-my-feature` after its branch is merged and clean.
+
+Run editable source without changing the installed release:
+
+```bash
+make dev DIR=.
+```
+
+Development uses isolated `~/.rtide-dev` configuration and `rtide-dev-*` sessions.
+Use `RTIDE_DEV_STATE=shared make dev` only when deliberately testing normal config.
+
+After changing runtime source, bump `VERSION` once and run the full pipeline:
+
+```bash
+make install
+```
+
+This checks syntax, runs every test, builds a deterministic payload, installs it
+under its version, atomically activates it, and verifies the installed version.
+`make build` stops after creating `dist/rtide-<version>.tar.gz`.
+
+RTIDE uses the source-controlled semantic version in `VERSION`. Runtime source
+changes must include a version bump or the build fails:
+
+```bash
+make bump-patch   # 0.1.0 -> 0.1.1
+make bump-minor   # 0.1.0 -> 0.2.0
+make bump-major   # 0.1.0 -> 1.0.0
+rtide --version
+```
+
+Reinstalling unchanged source does not increment the version. Use `rtide versions`
+to list retained releases and `rtide use <version>` to roll back.
+
+Package maintainers can stage the same payload without user-side effects:
+
+```bash
+make stage DESTDIR=/tmp/rtide-package PREFIX=/usr
+```
 
 ### Output routing
 

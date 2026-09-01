@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT"
+
+version=$(tr -d '[:space:]' < VERSION)
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || { echo "VERSION must use major.minor.patch" >&2; exit 1; }
+
+# Once VERSION is committed, any runtime-source change must include a VERSION
+# change in the same change set. Documentation and tests do not alter runtime.
+git rev-parse --verify HEAD >/dev/null 2>&1 || exit 0
+runtime_changes=$(
+  {
+    git diff --name-only HEAD -- bin share install.sh scripts
+    git ls-files --others --exclude-standard -- bin share install.sh scripts
+  } | grep -v '^scripts/check-version-bump$' | sort -u || true
+)
+[[ -z "$runtime_changes" ]] && exit 0
+
+if git cat-file -e HEAD:VERSION 2>/dev/null && git diff --quiet HEAD -- VERSION; then
+  echo "runtime source changed without a VERSION bump:" >&2
+  printf '  %s\n' $runtime_changes >&2
+  echo "run: make bump-patch  (or bump-minor / bump-major)" >&2
+  exit 1
+fi

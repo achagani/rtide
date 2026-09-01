@@ -6,3 +6,11 @@
 *.swo
 *~
 .DS_Store
+__pycache__/
+*.py[cod]
+exports/
+build/
+dist/
+.rtide/*
+!.rtide/memory/
+!.rtide/memory/**
