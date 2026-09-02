@@ -47,6 +47,8 @@ git -C "$TEST_TMP/project" add .gitignore app.txt
 git -C "$TEST_TMP/project" -c user.name=test -c user.email=test@example.invalid commit -qm baseline
 printf 'source edit\n' >> "$TEST_TMP/project/app.txt"
 printf 'untracked\n' > "$TEST_TMP/project/loose.txt"
+printf '%%77\n' > "$TEST_TMP/project/.rtide/tweb-pane"
+printf '99999\n' > "$TEST_TMP/project/.rtide/agent-ready"
 
 tmux new-session -d -s "$SESSION" -n work -c "$TEST_TMP/project"
 WINDOW=$(tmux display-message -p -t "$SESSION:work" '#{window_id}')
@@ -67,6 +69,7 @@ grep -F 'prior request' "$FORK/.rtide/fork-context.md" >/dev/null \
   || fail 'conversation context was not seeded'
 grep -F 'loose.txt' "$TEST_TMP/fork.err" >/dev/null || fail 'untracked files were not reported'
 [[ ! -e "$FORK/loose.txt" ]] || fail 'untracked file leaked into isolated worktree'
+[[ ! -e "$FORK/.rtide/agent-ready" ]] || fail 'source readiness marker leaked into first fork'
 [[ "$(tmux list-windows -t "$SESSION" | wc -l)" == 1 ]] || fail 'no-launch test unexpectedly created a window'
 grep -F 'launch_fork_window "$sess" "$fork_dir" "$name"' "$ROOT/bin/rtide" >/dev/null \
   || fail 'new fork window does not use the selected fork name'
@@ -80,11 +83,20 @@ fi
 SECOND_WINDOW=$(tmux new-window -d -P -F '#{window_id}' -t "$SESSION:" -n existing-fork -c "$FORK")
 SECOND_PANE=$(tmux display-message -p -t "$SECOND_WINDOW" '#{pane_id}')
 tmux set-option -p -t "$SECOND_PANE" @rtide-role nvim
+# Simulate the live runtime files that exist when a second fork is created
+# from an already running first fork.
+printf '%%88\n' > "$FORK/.rtide/tweb-pane"
+printf '12345\n' > "$FORK/.rtide/agent-ready"
 HOME="$TEST_TMP/home" RTIDE_FORK_NO_LAUNCH=1 \
   "$ROOT/bin/rtide" fork "$SESSION" "$SECOND_WINDOW" test-fork-2 >/dev/null
 [[ -d "$TEST_TMP/.rtide-worktrees/test-fork-2" ]] || fail 'fork-of-fork was not a sibling'
 [[ ! -e "$TEST_TMP/.rtide-worktrees/.rtide-worktrees" ]] || fail 'fork-of-fork nested its worktree root'
 [[ "$(git -C "$TEST_TMP/.rtide-worktrees/test-fork-2" branch --show-current)" == rtide/fork-2 ]] \
   || fail 'fork-of-fork branch numbering is wrong'
+SECOND="$TEST_TMP/.rtide-worktrees/test-fork-2"
+[[ ! -e "$SECOND/.rtide/tweb-pane" && ! -e "$SECOND/.rtide/agent-ready" ]] \
+  || fail 'second fork inherited live runtime routing from first fork'
+grep -F "file://$SECOND/.tweb/results/prior.html" "$SECOND/.rtide/output-history.json" >/dev/null \
+  || fail 'second fork history did not target its own artifacts'
 
 printf 'PASS: isolated worktrees, fork-of-fork, changes, artifacts, history, and context\n'

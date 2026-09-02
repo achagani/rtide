@@ -508,6 +508,11 @@ cmd_fork() {
   [[ -f "$source/.rtide/agent" ]] && cp "$source/.rtide/agent" "$fork_dir/.rtide/agent"
   if [[ -d "$source/.tweb" ]]; then
     cp -a "$source/.tweb/." "$fork_dir/.tweb/"
+    # A fork inherits authored outputs, never live runtime routing. Rewrite
+    # copied local-file references so fork-of-fork history stays self-contained.
+    while IFS= read -r page; do
+      sed -i "s|file://$source|file://$fork_dir|g" "$page"
+    done < <(find "$fork_dir/.tweb" -type f -name '*.html' -print)
   fi
   if [[ -f "$source/.rtide/output-history.json" ]]; then
     python3 - "$source" "$fork_dir" "$branch" <<'PY'
@@ -560,6 +565,12 @@ PY
   fi
   printf 'source=%s\nbranch=%s\ncreated=%s\n' "$source" "$branch" "$(date -Iseconds)" \
     > "$fork_dir/.rtide/fork-origin"
+  # Never inherit live process identity from the source fork. These files are
+  # valid only for the source tmux window and can make fork 2 appear ready or
+  # route its output into fork 1.
+  find "$fork_dir/.rtide/tweb-pane" "$fork_dir/.rtide/agent-ready" \
+    "$fork_dir/.rtide/render-request" -maxdepth 0 -type f -delete 2>/dev/null || true
+  find "$fork_dir/.rtide/nvim.sock" -maxdepth 0 -type s -delete 2>/dev/null || true
 
   untracked=$(git -C "$root" ls-files --others --exclude-standard | head -20 || true)
   [[ -z "$untracked" ]] || printf 'fork note: untracked source files were not copied:\n%s\n' "$untracked" >&2
