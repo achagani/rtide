@@ -85,14 +85,32 @@ providers_for_installed() {
 
 # pick <prompt> <default> <choices...> — fzf picker when available, else numbered list.
 # Free text is allowed: with fzf, a query that matches nothing is used as the answer.
+RTIDE_CANCELLED=0
+
+cancellable_input() {
+  local prompt="$1" def="${2:-}" result
+  RTIDE_CANCELLED=0
+  if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
+    result=$(printf '\n' | fzf --print-query --query='' --layout=reverse \
+      --border=rounded --height=40% --no-info --prompt="$prompt ❯ " \
+      --header="Enter = accept${def:+ · default: $def}   Esc = cancel") \
+      || { RTIDE_CANCELLED=1; return 130; }
+    result=$(printf '%s\n' "$result" | head -1)
+    printf '%s\n' "${result:-$def}"
+    return 0
+  fi
+  read -rp "$prompt${def:+ [$def]}: " result \
+    || { RTIDE_CANCELLED=1; return 130; }
+  [[ "$result" == $'\e' ]] && { RTIDE_CANCELLED=1; return 130; }
+  printf '%s\n' "${result:-$def}"
+}
+
 pick() {
   local prompt="$1" def="$2"; shift 2
   local choices=("$@")
   if [[ ${#choices[@]} -eq 0 ]]; then
-    local ans
-    read -rp "$prompt [$def]: " ans
-    echo "${ans:-$def}"
-    return
+    cancellable_input "$prompt" "$def"
+    return $?
   fi
   if [[ ${#choices[@]} -eq 1 ]]; then
     echo "${choices[0]}"
@@ -106,7 +124,8 @@ pick() {
       items=("$def")
       for c in "${choices[@]}"; do [[ "$c" != "$def" ]] && items+=("$c"); done
     fi
-    out=$(printf '%s\n' "${items[@]}" | fzf --prompt="$prompt: " --height=40% --border --print-query)
+    out=$(printf '%s\n' "${items[@]}" | fzf --prompt="$prompt: " --height=40% --border --print-query) \
+      || { RTIDE_CANCELLED=1; return 130; }
     sel=$(printf '%s\n' "$out" | tail -1)
     if printf '%s\n' "${choices[@]}" | grep -Fxq "$sel"; then
       echo "$sel"
@@ -140,17 +159,17 @@ prompt_selection() {
   [[ -n "$providers" ]] || { echo "no agents found — install one first"; exit 1; }
   # provider — default to the current one if it's still available
   [[ " $providers " == *" $1 "* ]] && PROVIDER="$1" || PROVIDER=""
-  PROVIDER=$(pick "AI provider" "${PROVIDER:-$(echo "$providers" | awk '{print $1}')}" $providers)
+  PROVIDER=$(pick "AI provider" "${PROVIDER:-$(echo "$providers" | awk '{print $1}')}" $providers) || return $?
   # harness (installed + compatible with the chosen provider)
   avail=()
   for h in $("$PROVIDER_BIN" compat "$PROVIDER"); do
     [[ " $installed " == *" $h "* ]] && avail+=("$h")
   done
   [[ " ${avail[*]} " == *" $2 "* ]] && HARNESS="$2" || HARNESS=""
-  HARNESS=$(pick "Harness" "${HARNESS:-${avail[0]}}" "${avail[@]}")
+  HARNESS=$(pick "Harness" "${HARNESS:-${avail[0]}}" "${avail[@]}") || return $?
   # model — default to the current one (free text allowed, so no availability check)
   models=$("$PROVIDER_BIN" models "$PROVIDER")
-  MODEL=$(pick "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models)
+  MODEL=$(pick "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models) || return $?
 }
 
 # --- commands --------------------------------------------------------------
@@ -160,22 +179,19 @@ setup_wizard() {
   local installed; installed=$(installed_harnesses)
   [[ -n "$installed" ]] || { echo "no agents found — install one first"; exit 1; }
   echo "Installed agents: $installed"
-  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}"
-  read -rp "Default directory (empty = current dir): " default_dir
-  read -rp "Agent strip lines [3]: " agent_lines
-  agent_lines="${agent_lines:-3}"
-  read -rp "tweb width % [60]: " tweb_pct
-  tweb_pct="${tweb_pct:-60}"
+  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}" || return 130
+  default_dir=$(cancellable_input "Default directory (empty = current dir)" "") || return 130
+  agent_lines=$(cancellable_input "Agent strip lines" "3") || return 130
+  tweb_pct=$(cancellable_input "tweb width %" "60") || return 130
   local shells=()
   for s in fish zsh nushell bash; do
     command -v "$s" >/dev/null 2>&1 && shells+=("$s")
   done
   local def_shell=fish
   command -v fish >/dev/null 2>&1 || def_shell=zsh
-  read -rp "Shell for running programs [$def_shell]: " shell
-  shell="${shell:-$def_shell}"
+  shell=$(pick "Shell for running programs" "$def_shell" "${shells[@]}") || return 130
   command -v "$shell" >/dev/null 2>&1 || echo "note: $shell not on PATH — install it (e.g. sudo apt install $shell)"
-  read -rp "Auto-float dense content? [y/N]: " af
+  af=$(pick "Auto-float dense content?" "N" "N" "y") || return 130
   local auto_float=false
   [[ "$af" =~ ^[yY] ]] && auto_float=true
   mkdir -p "$CONFIG_DIR"
@@ -194,7 +210,7 @@ EOF
 }
 
 cmd_setup() {
-  setup_wizard
+  setup_wizard || { echo "setup cancelled"; return 0; }
   "$SELF_DIR/rtide-mcp"
 }
 
@@ -230,8 +246,8 @@ cmd_doctor() {
 }
 
 cmd_new() {
-  read -rp "Directory for new workspace (empty = current): " ndir
-  ndir="${ndir:-$(pwd)}"
+  ndir=$(cancellable_input "Directory for new workspace" "$(pwd)") \
+    || { echo "new workspace cancelled"; return 0; }
   exec "$0" "$ndir"
 }
 

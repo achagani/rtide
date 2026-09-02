@@ -41,6 +41,11 @@ grep -F 'fzf --print-query' <<< "$name_source" >/dev/null \
 if grep -F 'read -r -e name' <<< "$name_source" >/dev/null; then
   fail 'new fork prompt still depends on inherited readline bindings'
 fi
+setup_source=$(sed -n '/^setup_wizard()/,/^cmd_doctor()/p' "$ROOT/bin/rtide")
+grep -F 'cancellable_input' <<< "$setup_source" >/dev/null \
+  || fail 'workspace setup does not use cancellable input'
+grep -F 'setup cancelled' <<< "$setup_source" >/dev/null \
+  || fail 'workspace setup does not stop cleanly on cancellation'
 grep -F '＋ Create new fork' "$ROOT/bin/rtide" >/dev/null \
   || fail 'Fork Manager does not include fork creation'
 if grep -F '"New fork…"' "$ROOT/bin/rtide" >/dev/null; then
