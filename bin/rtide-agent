@@ -325,6 +325,16 @@ def idle_status():
            f" {DIM}· type, edit, or prefix+v to speak{RESET}")
 
 
+def mark_agent_ready(workspace):
+    """Publish a wording-independent readiness signal for the launcher."""
+    marker = os.path.join(workspace, ".rtide", "agent-ready")
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    temporary = marker + f".{os.getpid()}.tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        handle.write(f"{os.getpid()}\n")
+    os.replace(temporary, marker)
+
+
 def activity(event=None):
     """Return the agent-emitted activity text and a presentation color."""
     if not event:
@@ -1013,6 +1023,7 @@ def main():
     clear()
     status(f"rtide-agent: {harness} + {provider} ({model})")
     idle_status()
+    mark_agent_ready(wdir)
 
     pending = []
     last_request = ""

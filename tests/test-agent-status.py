@@ -36,6 +36,14 @@ class AgentStatusTests(unittest.TestCase):
         self.assertEqual(text, "Checking the pane layout…")
         self.assertEqual(color, AGENT.CYAN)
 
+    def test_agent_readiness_uses_atomic_workspace_marker(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            AGENT.mark_agent_ready(workspace)
+            marker = os.path.join(workspace, ".rtide", "agent-ready")
+            self.assertTrue(os.path.isfile(marker))
+            with open(marker) as marker_file:
+                self.assertEqual(int(marker_file.read()), os.getpid())
+
     def test_timer_and_activity_stay_on_one_line(self):
         out = io.StringIO()
         size = os.terminal_size((36, 24))

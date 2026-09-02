@@ -1522,6 +1522,7 @@ for k, v in [("{{WORKSPACE}}", ws), ("{{PATH}}", path), ("{{PROVIDER}}", prov),
 open(out, "w").write(html)
 PY
 tmux send-keys -t "$TWEB_PANE" "tweb open file://$DIR/.tweb/welcome.html" Enter
+find "$DIR/.rtide/agent-ready" -maxdepth 0 -type f -delete 2>/dev/null || true
 tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
 
 # Readiness barrier: wait for concrete signals from all three surfaces, then
@@ -1533,8 +1534,12 @@ while (( SECONDS < READY_DEADLINE )); do
   [[ -S "$DIR/.rtide/nvim.sock" ]] && READY_NVIM=1
   tweb status --pane "$TWEB_PANE" 2>/dev/null \
     | grep -Fq "file://$DIR/.tweb/welcome.html" && READY_TWEB=1 || true
-  tmux capture-pane -p -t "$AGENT_PANE" -S -10 2>/dev/null \
-    | grep -Fq '● idle' && READY_AGENT=1 || true
+  if [[ -f "$DIR/.rtide/agent-ready" ]]; then
+    READY_AGENT=1
+  else
+    tmux capture-pane -p -t "$AGENT_PANE" -S -10 2>/dev/null \
+      | grep -Fq '● ready' && READY_AGENT=1 || true
+  fi
   (( READY_NVIM && READY_TWEB && READY_AGENT )) && break
   sleep 0.1
 done

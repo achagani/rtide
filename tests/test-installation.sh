@@ -31,6 +31,11 @@ grep -F 'DEV BUILD' "$ROOT/bin/rtide" >/dev/null \
   || fail 'development tmux badge is missing'
 grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
   || fail 'development welcome theme is missing'
+grep -F '.rtide/agent-ready' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'workspace launcher lacks a stable agent readiness marker'
+if grep -Fq "grep -Fq '● idle'" "$ROOT/bin/rtide"; then
+  fail 'workspace launcher still waits for the obsolete idle label'
+fi
 grep -F '"Fork Manager…"' "$ROOT/bin/rtide" >/dev/null \
   || fail 'actions menu does not expose the Fork Manager'
 grep -F 'Escape' "$ROOT/bin/rtide" >/dev/null \
