@@ -49,6 +49,28 @@ class ProgressTests(unittest.TestCase):
         self.assertTrue((self.workspace / ".tweb/implementation-fork-menu-fix.html").exists())
         self.assertTrue((self.workspace / ".tweb/implementation-window-naming-fix.html").exists())
 
+    def test_active_workflow_starts_updates_and_completes_current_run(self):
+        started = self.run_progress("start", "Active feature", "--steps", "Audit", "Build")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        pointer = self.workspace / ".rtide/progress/active"
+        self.assertEqual(pointer.read_text().strip(), "active-feature")
+        updated = self.run_progress("checkpoint", "Audit", "Mapped behavior", "--status", "complete")
+        self.assertEqual(updated.returncode, 0, updated.stderr)
+        finished = self.run_progress("complete", "--summary", "Shipped", "--metric", "tests=3")
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        self.assertFalse(pointer.exists())
+        state = json.loads((self.workspace / ".rtide/progress/active-feature.json").read_text())
+        self.assertEqual(state["status"], "complete")
+        self.assertIn("Mapped behavior", state["steps"][0]["events"][0]["message"])
+
+    def test_checkpoint_adopts_one_legacy_active_dashboard(self):
+        self.run_progress("init", "Legacy active", "--steps", "Build")
+        (self.workspace / ".rtide/progress/active").unlink()
+        result = self.run_progress("checkpoint", "Build", "Adopted", "--status", "complete")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.workspace / ".rtide/progress/active").read_text().strip(),
+                         "legacy-active")
+
 
 if __name__ == "__main__":
     unittest.main()

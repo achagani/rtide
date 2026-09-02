@@ -87,6 +87,36 @@ def paths(workspace: Path, dashboard: str) -> tuple[Path, Path]:
     return workspace / ".rtide" / "progress" / f"{slug}.json", workspace / ".tweb" / f"implementation-{slug}.html"
 
 
+def active_path(workspace: Path) -> Path:
+    return workspace / ".rtide" / "progress" / "active"
+
+
+def set_active(workspace: Path, dashboard: str) -> None:
+    pointer = active_path(workspace)
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(slugify(dashboard) + "\n", encoding="utf-8")
+
+
+def get_active(workspace: Path) -> str:
+    try:
+        value = active_path(workspace).read_text(encoding="utf-8").strip()
+    except OSError:
+        candidates = []
+        for state_file in (workspace / ".rtide" / "progress").glob("*.json"):
+            try:
+                if load(state_file).get("status") == "active":
+                    candidates.append(state_file.stem)
+            except SystemExit:
+                continue
+        if len(candidates) == 1:
+            set_active(workspace, candidates[0])
+            return candidates[0]
+        raise SystemExit("progress error: no unique active implementation dashboard; run 'rtide-progress start' first")
+    if not value:
+        raise SystemExit("progress error: active implementation dashboard is empty")
+    return value
+
+
 def active_url(workspace: Path) -> str | None:
     """Return the active tweb URL when the registered pane is queryable."""
     registration = workspace / ".rtide" / "tweb-pane"
@@ -132,11 +162,22 @@ def main() -> int:
     init = sub.add_parser("init"); init.add_argument("title"); init.add_argument("--objective", default=""); init.add_argument("--steps", nargs="+", required=True)
     event = sub.add_parser("event"); event.add_argument("dashboard"); event.add_argument("step"); event.add_argument("message"); event.add_argument("--status", choices=("pending", "active", "blocked", "complete"))
     finish = sub.add_parser("finish"); finish.add_argument("dashboard"); finish.add_argument("--summary", required=True); finish.add_argument("--metric", action="append", default=[]); finish.add_argument("--blocked", action="store_true")
+    start = sub.add_parser("start"); start.add_argument("title"); start.add_argument("--objective", default=""); start.add_argument("--steps", nargs="+", required=True)
+    checkpoint = sub.add_parser("checkpoint"); checkpoint.add_argument("step"); checkpoint.add_argument("message"); checkpoint.add_argument("--status", choices=("pending", "active", "blocked", "complete"), default="active")
+    complete = sub.add_parser("complete"); complete.add_argument("--summary", required=True); complete.add_argument("--metric", action="append", default=[]); complete.add_argument("--blocked", action="store_true")
     args = parser.parse_args()
     workspace = Path(args.workspace).resolve()
+    if args.command in {"start", "checkpoint", "complete"}:
+        if args.command == "start":
+            args.command = "init"
+            set_active(workspace, args.title)
+        else:
+            args.dashboard = get_active(workspace)
+            args.command = "event" if args.command == "checkpoint" else "finish"
     state_path, output = paths(workspace, args.title if args.command == "init" else args.dashboard)
     if args.command == "init":
         data = {"schema": 1, "kind": "implementation-dashboard", "title": args.title, "objective": args.objective, "status": "active", "created": now(), "updated": now(), "summary": "Implementation is in progress.", "steps": [{"id": slugify(title), "title": title, "status": "pending", "detail": "", "events": []} for title in args.steps], "metrics": [], "log": [{"time": now(), "message": "Dashboard initialized"}]}
+        set_active(workspace, args.title)
     else:
         data = load(state_path)
         if args.command == "event":
@@ -161,6 +202,9 @@ def main() -> int:
                 metrics.append({"label": label, "value": number})
             data["metrics"] = metrics
             data["log"].append({"time": now(), "message": "Dashboard finalized"})
+            active = active_path(workspace)
+            if active.exists() and active.read_text(encoding="utf-8").strip() == slugify(args.dashboard):
+                active.unlink()
         data["updated"] = now()
     atomic_json(state_path, data)
     render(data, output)

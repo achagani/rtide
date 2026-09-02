@@ -137,7 +137,7 @@ rtide <dir>      → launch/attach the workspace for <dir> (prompts for provider
 rtide new        → guided new workspace
 rtide fork [session] [window] [name] → fork into an isolated Git worktree, agent session, and tweb pane in a new tmux window
 rtide fork list|resume|stop|status|memories|finish [name] → manage persistent feature forks
-rtide-progress init|event|finish → publish a real-time implementation dashboard with animated substeps
+rtide-progress start|checkpoint|complete → publish and continuously rerender the active implementation dashboard
 rtide switch     → same picker as bare rtide (resume / new)
 rtide ls         → list workspaces
 rtide sweep      → capture pending MEM: memories from every live session

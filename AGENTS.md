@@ -59,6 +59,18 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 6. Use `~/rtide/share/template.html` as a technical foundation and the design
    playbook for art direction; adapt both to the subject instead of cloning a theme.
 
+## Implementation dashboard
+- For every source-changing implementation task, run `rtide-progress start` before
+  the first source edit. Give it a task-specific title, objective, and meaningful steps.
+- After each meaningful checkpoint, run `rtide-progress checkpoint <step> <message>
+  --status active|complete|blocked`. Each checkpoint rewrites and rerenders the active
+  dashboard; do not defer dashboard population until the implementation is finished.
+- End every implementation with `rtide-progress complete --summary <outcome>` and
+  metrics for the commit, version, tests, and any limitations. The command clears the
+  active-run pointer only after writing the final execution summary.
+- Treat a queued render and a visually acknowledged upper-pane render as different
+  states. Report the warning if the pane cannot be verified instead of claiming it displayed.
+
 ## Tools
 - `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb
 - `tweb-run <cmd>` — run a program, render its output in tweb (exit code, duration)
