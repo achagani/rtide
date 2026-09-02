@@ -30,6 +30,8 @@ RTIDE_ROOT="${RTIDE_ROOT:-$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)}"
 SELF_DIR="$RTIDE_ROOT/bin"
 PROVIDER_BIN="$SELF_DIR/rtide-provider"
 TWEB_DIR="$RTIDE_ROOT/share"
+RTIDE_MARK="$TWEB_DIR/assets/rtide-mark.png"
+[[ -f "$RTIDE_MARK" ]] || RTIDE_MARK="$RTIDE_ROOT/docs/assets/rtide-mark.png"
 CONFIG_DIR="${RTIDE_CONFIG_DIR:-$HOME/.rtide}"
 CONFIG="$CONFIG_DIR/config"
 WS_AGENT_FILE=".rtide/agent"   # per-workspace override, relative to the workspace dir
@@ -1331,7 +1333,10 @@ mkdir -p "$DIR/.tweb"
 [[ -f "$DIR/.tweb/template.html" ]] || cp "$TWEB_DIR/template.html" "$DIR/.tweb/template.html"
 [[ -f "$DIR/.tweb/DESIGN_PLAYBOOK.md" ]] || cp "$TWEB_DIR/DESIGN_PLAYBOOK.md" "$DIR/.tweb/DESIGN_PLAYBOOK.md"
 mkdir -p "$DIR/.tweb/assets"
-[[ -f "$DIR/.tweb/assets/rtide-mark.png" ]] || cp "$TWEB_DIR/assets/rtide-mark.png" "$DIR/.tweb/assets/rtide-mark.png"
+if [[ ! -f "$DIR/.tweb/assets/rtide-mark.png" ]]; then
+  [[ -f "$RTIDE_MARK" ]] || { echo "RTIDE asset missing: rtide-mark.png" >&2; exit 1; }
+  cp "$RTIDE_MARK" "$DIR/.tweb/assets/rtide-mark.png"
+fi
 grep -q '^\.tweb/$' "$DIR/.gitignore" 2>/dev/null || echo '.tweb/' >> "$DIR/.gitignore"
 grep -q '^exports/$' "$DIR/.gitignore" 2>/dev/null || echo 'exports/' >> "$DIR/.gitignore"
 grep -q '^\.rtide/\*$' "$DIR/.gitignore" 2>/dev/null || {

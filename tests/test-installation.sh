@@ -23,6 +23,8 @@ mkdir -p "$RTIDE_BIN_DIR" "$TEST_TMP/build" "$TEST_TMP/dist"
 # Development dispatch uses source directly and isolated configuration.
 dev_version=$(bash "$ROOT/scripts/rtide-dev" "$TEST_TMP/dev workspace" --version)
 [[ "$dev_version" == "rtide $(tr -d '[:space:]' < "$ROOT/VERSION")" ]] || fail 'development runner did not use source'
+grep -F 'RTIDE_ROOT/docs/assets/rtide-mark.png' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'source development asset fallback is missing'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
