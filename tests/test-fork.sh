@@ -68,6 +68,8 @@ grep -F 'prior request' "$FORK/.rtide/fork-context.md" >/dev/null \
 grep -F 'loose.txt' "$TEST_TMP/fork.err" >/dev/null || fail 'untracked files were not reported'
 [[ ! -e "$FORK/loose.txt" ]] || fail 'untracked file leaked into isolated worktree'
 [[ "$(tmux list-windows -t "$SESSION" | wc -l)" == 1 ]] || fail 'no-launch test unexpectedly created a window'
+grep -F 'launch_fork_window "$sess" "$fork_dir" "$name"' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'new fork window does not use the selected fork name'
 if HOME="$TEST_TMP/home" RTIDE_FORK_NO_LAUNCH=1 \
     "$ROOT/bin/rtide" fork "$SESSION" "$WINDOW" test-fork >/dev/null 2>&1; then
   fail 'duplicate fork name unexpectedly succeeded'

@@ -41,6 +41,14 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(state["status"], "blocked")
         self.assertEqual(state["steps"][0]["status"], "blocked")
 
+    def test_separate_titles_create_separate_execution_runs(self):
+        self.run_progress("init", "Fork menu fix", "--steps", "Build")
+        self.run_progress("init", "Window naming fix", "--steps", "Build")
+        self.assertTrue((self.workspace / ".rtide/progress/fork-menu-fix.json").exists())
+        self.assertTrue((self.workspace / ".rtide/progress/window-naming-fix.json").exists())
+        self.assertTrue((self.workspace / ".tweb/implementation-fork-menu-fix.html").exists())
+        self.assertTrue((self.workspace / ".tweb/implementation-window-naming-fix.html").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

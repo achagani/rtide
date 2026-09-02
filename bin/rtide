@@ -492,7 +492,7 @@ PY
   printf 'fork: %s\nworktree: %s\nbranch: %s\n' "$name" "$fork_dir" "$branch"
   [[ "${RTIDE_FORK_NO_LAUNCH:-0}" == 1 ]] && return 0
 
-  launch_fork_window "$sess" "$fork_dir" "fork-$number" "$initial_prompt"
+  launch_fork_window "$sess" "$fork_dir" "$name" "$initial_prompt"
   exit 0
 }
 

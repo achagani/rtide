@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 
 def slugify(value: str) -> str:
@@ -86,9 +87,41 @@ def paths(workspace: Path, dashboard: str) -> tuple[Path, Path]:
     return workspace / ".rtide" / "progress" / f"{slug}.json", workspace / ".tweb" / f"implementation-{slug}.html"
 
 
-def show(output: Path, no_render: bool) -> None:
+def active_url(workspace: Path) -> str | None:
+    """Return the active tweb URL when the registered pane is queryable."""
+    registration = workspace / ".rtide" / "tweb-pane"
+    try:
+        pane = registration.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    result = subprocess.run(["tweb", "status", "--pane", pane], capture_output=True, text=True)
+    if result.returncode:
+        return None
+    try:
+        tabs = json.loads(result.stdout)["tabs"]["tabs"]
+        return next(tab["url"] for tab in tabs if tab.get("active"))
+    except (KeyError, TypeError, ValueError, StopIteration):
+        return None
+
+
+def show(output: Path, no_render: bool, workspace: Path) -> None:
     if not no_render:
-        subprocess.run(["tweb-render", str(output)], check=False)
+        target = output.resolve().as_uri()
+        result = subprocess.run(["tweb-render", str(output)], capture_output=True, text=True)
+        if result.returncode:
+            raise SystemExit(result.stderr.strip() or "progress error: dashboard render failed")
+        # A sandboxed render may be queued for the workspace controller. Wait
+        # briefly for that controller to acknowledge the requested URL instead
+        # of reporting a refresh that the upper pane has not displayed yet.
+        if "queued render" in result.stdout:
+            for _ in range(20):
+                if active_url(workspace) == target:
+                    break
+                time.sleep(0.05)
+            else:
+                print("progress warning: dashboard queued; upper pane has not acknowledged it yet", file=sys.stderr)
+        elif active_url(workspace) not in (None, target):
+            print("progress warning: upper pane did not confirm the dashboard URL", file=sys.stderr)
 
 
 def main() -> int:
@@ -131,7 +164,7 @@ def main() -> int:
         data["updated"] = now()
     atomic_json(state_path, data)
     render(data, output)
-    show(output, args.no_render)
+    show(output, args.no_render, workspace)
     print(output)
     return 0
 
