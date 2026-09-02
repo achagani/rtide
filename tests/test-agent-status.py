@@ -161,7 +161,10 @@ class AgentStatusTests(unittest.TestCase):
             with mock.patch.object(AGENT.subprocess, "run", side_effect=[location, launched]) as run:
                 ok, _ = AGENT.fork_command("status running-icon")
         self.assertTrue(ok)
-        self.assertEqual(run.call_args_list[1].args[0], [AGENT.RTIDE_BIN, "fork", "status", "running-icon"])
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            [AGENT.RTIDE_BIN, "fork", "status", "running-icon", "%9"],
+        )
 
     def test_codex_command_event_uses_agent_payload(self):
         event = {

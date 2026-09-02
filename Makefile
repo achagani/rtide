@@ -5,6 +5,7 @@ PAYLOAD := $(CURDIR)/build/rtide-$(VERSION)
 BASH_SOURCES := install.sh \
 	bin/rtide bin/rtide-mcp bin/rtide-mem bin/rtide-open \
 	bin/rtide-forks \
+	bin/rtide-picker \
 	bin/rtide-memory-index \
 	bin/rtide-progress \
 	bin/rtide-provider bin/rtide-tweb-common bin/tweb-render bin/tweb-run \
@@ -15,7 +16,7 @@ PYTHON_SOURCES := bin/rtide-agent bin/rtide-dictate scripts/bump-version \
 	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py \
 	tests/test-progress.py
 
-.PHONY: all check test build dev install stage verify-install bump-patch bump-minor bump-major
+.PHONY: all check test build clean dev install stage verify-install bump-patch bump-minor bump-major
 
 all: build
 
@@ -27,6 +28,7 @@ check:
 
 test: check
 	./tests/test-picker-contract.sh
+	./tests/test-fork-snapshot.sh
 	./tests/test-output-routing.sh
 	./tests/test-fork.sh
 	python3 -m unittest tests/test-agent-status.py
@@ -38,6 +40,11 @@ test: check
 build: test
 	python3 scripts/package-tool build --root "$(CURDIR)" --build-dir "$(CURDIR)/build" --dist-dir "$(CURDIR)/dist"
 	@printf 'BUILD OK: dist/rtide-%s.tar.gz\n' "$(VERSION)"
+
+clean:
+	find "$(CURDIR)/build" "$(CURDIR)/dist" -mindepth 1 -delete 2>/dev/null || true
+	rmdir "$(CURDIR)/build" "$(CURDIR)/dist" 2>/dev/null || true
+	@printf 'CLEAN OK: removed generated build and distribution artifacts\n'
 
 dev:
 	bash scripts/rtide-dev "$(or $(DIR),.)" $(ARGS)

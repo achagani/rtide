@@ -10,7 +10,7 @@ DESTDIR="${DESTDIR:?DESTDIR is required for package staging}"
 PREFIX="${PREFIX:-/usr/local}"
 LIB_DIR="$DESTDIR$PREFIX/lib/rtide"
 BIN_DIR="$DESTDIR$PREFIX/bin"
-COMMANDS=(rtide rtide-provider rtide-mcp rtide-mem rtide-forks rtide-memory-index rtide-progress rtide-agent rtide-dictate rtide-open tweb-render tweb-run)
+COMMANDS=(rtide rtide-picker rtide-provider rtide-mcp rtide-mem rtide-forks rtide-memory-index rtide-progress rtide-agent rtide-dictate rtide-open tweb-render tweb-run)
 
 python3 "$ROOT/scripts/package-tool" verify "$PAYLOAD" >/dev/null
 mkdir -p "$LIB_DIR" "$BIN_DIR"

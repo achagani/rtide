@@ -241,10 +241,11 @@ def fork_command(arguments):
     session, window = fields
     words = arguments.split(maxsplit=1)
     action = words[0] if words else ""
-    if action in {"list", "resume", "stop", "status", "finish", "memories"}:
+    if action in {"list", "resume", "stop", "status", "finish", "memories", "repair"}:
         command = [RTIDE_BIN, "fork", action]
         if len(words) == 2:
             command.append(words[1])
+        command.append(pane)
     else:
         prompt = words[1] if action == "new" and len(words) == 2 else arguments
         command = [RTIDE_BIN, "fork", session, window, "", prompt]

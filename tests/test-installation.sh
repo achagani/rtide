@@ -70,21 +70,37 @@ manager_source=$(sed -n '/^cmd_fork_menu()/,/^cmd_fork_new_popup()/p' "$ROOT/bin
 if grep -F -- '--preview-window=right:' <<< "$manager_source" >/dev/null; then
   fail 'Fork Manager still uses a clipping side preview'
 fi
-for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish and remove'; do
+for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Repair runtime state' 'Finish and remove'; do
   grep -F "$action" <<< "$manager_source" >/dev/null \
     || fail "Fork Manager is missing lifecycle action: $action"
 done
-grep -F 'tmux display-popup -C' <<< "$manager_source" >/dev/null \
-  || fail 'Fork Manager actions do not close the popup before dispatch'
-grep -F 'fork-menu-action' <<< "$manager_source" >/dev/null \
-  || fail 'Fork Manager lacks an outside-popup action dispatcher'
+grep -F 'dispatch_fork_menu_action' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager does not use its outside-popup action dispatcher'
+grep -F 'dispatch_fork_menu_action create "$selected" "$pane"' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager creation still runs in the popup-owned process'
+dispatch_source=$(sed -n '/^dispatch_fork_menu_action()/,/^cmd_fork_menu()/p' "$ROOT/bin/rtide")
+grep -F 'tmux run-shell -b "$command"' <<< "$dispatch_source" >/dev/null \
+  || fail 'Fork Manager dispatcher is not owned by the tmux server'
+grep -F 'fork-menu-action' <<< "$dispatch_source" >/dev/null \
+  || fail 'Fork Manager dispatcher does not invoke the lifecycle action command'
+grep -F 'tmux display-popup -C' <<< "$dispatch_source" >/dev/null \
+  || fail 'Fork Manager actions do not close their popup after dispatch'
+dispatch_line=$(grep -n 'tmux run-shell -b' <<< "$dispatch_source" | cut -d: -f1)
+close_line=$(grep -n 'tmux display-popup -C' <<< "$dispatch_source" | cut -d: -f1)
+(( dispatch_line < close_line )) || fail 'Fork Manager closes its popup before handing work to tmux'
 grep -F '● running' <<< "$manager_source" >/dev/null \
   || fail 'Fork Manager does not show runtime state'
-grep -F 'searchable_choice "$output" new' <<< "$manager_source" >/dev/null \
+grep -F 'rtide_picker_decode "$output" create new' <<< "$manager_source" >/dev/null \
   || fail 'Fork Manager does not create an unknown search query'
 workspace_picker=$(sed -n '/^cmd_pick()/,/^cmd_sweep()/p' "$ROOT/bin/rtide")
-grep -F 'searchable_choice "$out" workspace' <<< "$workspace_picker" >/dev/null \
+grep -F 'rtide_picker_decode "$out" create workspace' <<< "$workspace_picker" >/dev/null \
   || fail 'workspace picker does not share searchable-create behavior'
+fork_source=$(sed -n '/^cmd_fork()/,/^install_session_hooks()/p' "$ROOT/bin/rtide")
+grep -F 'validate_fork_snapshot "$root"' <<< "$fork_source" >/dev/null \
+  || fail 'fork creation does not validate development snapshot completeness'
+snapshot_source=$(sed -n '/^validate_fork_snapshot()/,/^}/p' "$ROOT/bin/rtide")
+grep -F 'runtime dependency is untracked' <<< "$snapshot_source" >/dev/null \
+  || fail 'fork snapshot validation does not identify untracked runtime dependencies'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
@@ -92,6 +108,7 @@ BASE="$TEST_TMP/build/rtide-$(tr -d '[:space:]' < "$ROOT/VERSION")"
 [[ -f "$BASE/share/assets/rtide-mark.png" ]] || fail 'release payload omitted the RTIDE logo'
 [[ -x "$BASE/bin/rtide-forks" && -x "$BASE/bin/rtide-memory-index" ]] \
   || fail 'release payload omitted fork manager helpers'
+[[ -x "$BASE/bin/rtide-picker" ]] || fail 'release payload omitted the shared picker helper'
 [[ -x "$BASE/bin/rtide-progress" ]] || fail 'release payload omitted implementation dashboard helper'
 grep -F 'src="assets/rtide-mark.png"' "$BASE/share/welcome.html" >/dev/null \
   || fail 'welcome screen does not use the packaged logo'

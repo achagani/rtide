@@ -2,35 +2,40 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-source <(sed -n '/^searchable_choice()/,/^}/p' "$ROOT/bin/rtide")
+source "$ROOT/bin/rtide-picker"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-result=$(searchable_choice $'existing\nexisting\tbranch\tclean' new)
+result=$(rtide_picker_decode $'existing\nexisting\tbranch\tclean' create new)
 [[ "$result" == $'open\texisting\tbranch\tclean' ]] \
   || fail 'existing selection did not win over query'
 
-result=$(searchable_choice $'exis\nexisting\tbranch\tclean' new)
+result=$(rtide_picker_decode $'exis\nexisting\tbranch\tclean' create new)
 [[ "$result" == $'create\texis' ]] \
   || fail 'partial fuzzy match opened an existing item instead of creating exact query'
 
-result=$(searchable_choice $'brand-new\n' new)
+result=$(rtide_picker_decode $'brand-new\n' create new)
 [[ "$result" == $'create\tbrand-new' ]] \
   || fail 'unknown fork query did not create'
 
-result=$(searchable_choice $'a-very-long-fork-name\n' new)
+result=$(rtide_picker_decode $'a-very-long-fork-name\n' create new)
 [[ "$result" == $'create\ta-very-long-fork-name' ]] \
   || fail 'long unknown fork query did not create'
 
-result=$(searchable_choice $'new-place\n' workspace)
+result=$(rtide_picker_decode $'new-place\n' create workspace)
 [[ "$result" == $'create\tnew-place' ]] \
   || fail 'unknown workspace query did not create'
 
-result=$(searchable_choice $'\n＋ Create new fork\tnew\t\t' new)
+result=$(rtide_picker_decode $'\n＋ Create new fork\tnew\t\t' create new)
 [[ "$result" == $'create\t' ]] \
   || fail 'explicit create row did not request guided creation'
 
-result=$(searchable_choice '' new)
+result=$(rtide_picker_decode '' create new)
 [[ "$result" == $'cancel\t' ]] \
   || fail 'empty picker result did not cancel'
+
+result=$(rtide_picker_decode $'query\nknown\tvalue' select ignored)
+[[ "$result" == $'open\tknown\tvalue' ]] || fail 'select-only policy rejected selection'
+result=$(rtide_picker_decode $'custom-model\n' freeform ignored)
+[[ "$result" == $'value\tcustom-model' ]] || fail 'freeform policy rejected value'
 
 printf 'PASS: searchable picker open, create, guided-create, and cancel contract\n'
