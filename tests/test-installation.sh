@@ -35,6 +35,15 @@ grep -F '"Fork Manager…"' "$ROOT/bin/rtide" >/dev/null \
   || fail 'actions menu does not expose the Fork Manager'
 grep -F 'abort-current-line' "$ROOT/bin/rtide" >/dev/null \
   || fail 'new fork popup does not bind Escape to cancel'
+grep -F '＋ Create new fork' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'Fork Manager does not include fork creation'
+if grep -F '"New fork…"' "$ROOT/bin/rtide" >/dev/null; then
+  fail 'fork creation is duplicated outside the Fork Manager'
+fi
+manager_source=$(sed -n '/^cmd_fork_menu()/,/^cmd_fork_new_popup()/p' "$ROOT/bin/rtide")
+if grep -F -- '--preview-window=right:' <<< "$manager_source" >/dev/null; then
+  fail 'Fork Manager still uses a clipping side preview'
+fi
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null

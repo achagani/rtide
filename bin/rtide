@@ -349,21 +349,25 @@ cmd_fork_manager() {
 }
 
 cmd_fork_menu() {
-  local pane="${2:-${TMUX_PANE:-}}" sess root selected name branch state ahead path action quoted
+  local pane="${2:-${TMUX_PANE:-}}" sess window root selected name branch state ahead path action
   [[ -n "$pane" ]] || return 1
   sess=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
+  window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
   root=$(fork_root_from_context "$pane") || { echo "fork: not in a Git repository" >&2; return 1; }
   command -v fzf >/dev/null 2>&1 || { echo "fork: fzf is required for the visual manager" >&2; return 1; }
-  selected=$("$SELF_DIR/rtide-forks" --root "$root" list \
-    | fzf --ansi --layout=reverse --border=rounded --height=80% \
-      --header=$'Fork Manager\nEnter = actions   type to filter   Esc = cancel' \
-      --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,2,3,4 \
-      --preview='printf "Name: %s\nBranch: %s\nState: %s\nCommits: %s\nPath: %s\n" {1} {2} {3} {4} {5}' \
-      --preview-window=right:45%:wrap) || return 0
+  selected=$({ printf '＋ Create new fork\tnew\t\t\t\n'; "$SELF_DIR/rtide-forks" --root "$root" list; } \
+    | fzf --ansi --layout=reverse --border=rounded --height=100% \
+      --header=$'Fork Manager · create, resume, inspect, or stop\nEnter = select   type = filter   Esc = close' \
+      --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,3,4) || return 0
   IFS=$'\t' read -r name branch state ahead path <<< "$selected"
+  if [[ "$branch" == new ]]; then
+    cmd_fork_new_popup _ "$sess" "$window"
+    return
+  fi
   action=$(printf '%s\n' \
     'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish fork' \
-    | fzf --layout=reverse --border=rounded --height=60% --header="$name · $state · $ahead" \
+    | fzf --layout=reverse --border=rounded --height=100% \
+      --header=$'Fork actions\n'"$name · $state · $ahead" \
       --prompt='action ❯ ') || return 0
   case "$action" in
     'Resume or switch') "$0" fork resume "$name" ;;
@@ -1034,8 +1038,7 @@ cmd_menu() {
     "Switch workspace" r "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD switch'" \
     "Change agent…"    m "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 70% '$RTIDE_CMD agent'" \
     "New workspace…"   n "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD new'" \
-    "New fork…"         f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 35% 'bash --noprofile --norc -c '\''bind '\''\''\"\\e\": abort-current-line\"'\''; $RTIDE_CMD fork-new-popup ${sess} ${window}'\'''" \
-    "Fork Manager…"     F "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 90% -h 80% '$RTIDE_CMD fork-menu #{pane_id}'" \
+    "Fork Manager…"     f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 58% -h 72% '$RTIDE_CMD fork-menu #{pane_id}'" \
     "" \
     "- LAYOUT & VIEW"   "" "" \
     "Refresh layout"   R "run-shell '$RTIDE_CMD refresh-window ${window}'" \
@@ -1180,7 +1183,6 @@ cmd_slash_menu() {
     -S 'bg=#181825,fg=#cba6f7' -H 'bg=#45475a,fg=#89dceb,bold' \
     -T "#[align=centre,fg=#94e2d5,bold] Prompt commands" -x 2 -y C \
     "Fork Manager…" f "run-shell '$RTIDE_CMD fork-menu $pane'" \
-    "New fork…" n "send-keys -t '$pane' -l '/fork new '" \
     "Steer current turn…" s "send-keys -t '$pane' -l '/steer '" \
     "Interrupt current turn" i "send-keys -t '$pane' -l '/interrupt'; send-keys -t '$pane' Enter" \
     "Queue count" q "send-keys -t '$pane' -l '/queue'; send-keys -t '$pane' Enter" \
