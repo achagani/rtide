@@ -371,9 +371,9 @@ fork_root_from_context() {
 }
 
 cmd_fork_manager() {
-  local action="${2:-list}" selector="${3:-}" sess root item path window
-  sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
-  root=$(fork_root_from_context "${TMUX_PANE:-}") || { echo "fork: not in a Git repository" >&2; return 1; }
+  local action="${2:-list}" selector="${3:-}" context_pane="${4:-${TMUX_PANE:-}}" sess root item path window
+  sess=$(tmux display-message -p -t "$context_pane" '#{session_name}' 2>/dev/null || true)
+  root=$(fork_root_from_context "$context_pane") || { echo "fork: not in a Git repository" >&2; return 1; }
   case "$action" in
     list|status)
       [[ "$action" == list ]] && "$SELF_DIR/rtide-forks" --root "$root" list \
@@ -418,6 +418,30 @@ cmd_fork_manager() {
   esac
 }
 
+cmd_fork_menu_action() {
+  local action="${2:-}" name="${3:-}" pane="${4:-}" root item path answer
+  [[ -n "$action" && -n "$name" && -n "$pane" ]] || return 2
+  case "$action" in
+    resume) "$0" fork resume "$name" "$pane" ;;
+    status) "$0" fork status "$name" "$pane" | less -R ;;
+    stop) "$0" fork stop "$name" "$pane" ;;
+    memories)
+      "$0" fork memories "$name" "$pane" >/dev/null || return
+      root=$(fork_root_from_context "$pane") || return
+      item=$("$SELF_DIR/rtide-forks" --root "$root" status "$name" --json) || return
+      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
+      ${EDITOR:-nvim} "$path/.rtide/memory/.index-v2/index.json"
+      ;;
+    remove)
+      if printf 'Finish %s and remove its worktree? [y/N] ' "$name" \
+          && IFS= read -r answer && [[ "$answer" =~ ^[Yy]$ ]]; then
+        "$0" fork remove "$name" "$pane"
+      fi
+      ;;
+    *) return 2 ;;
+  esac
+}
+
 cmd_fork_menu() {
   local pane="${2:-${TMUX_PANE:-}}" sess window root output decision mode selected name branch state ahead path memories action running label
   [[ -n "$pane" ]] || return 1
@@ -448,27 +472,15 @@ cmd_fork_menu() {
   [[ "$mode" == open ]] || return 0
   IFS=$'\t' read -r name branch state ahead path memories <<< "$selected"
   action=$(printf '%s\n' \
-    'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish and remove' \
+    $'resume\tResume or switch' $'status\tView status' $'stop\tStop runtime' \
+    $'memories\tReview memories' $'remove\tFinish and remove' \
     | fzf --layout=reverse --border=rounded --height=100% \
+      --delimiter=$'\t' --with-nth=2 \
       --header=$'Fork actions\n'"$name · $state · $ahead" \
       --prompt='action ❯ ') || return 0
-  case "$action" in
-    'Resume or switch') "$0" fork resume "$name" ;;
-    'View status') "$0" fork status "$name" | less -R ;;
-    'Stop runtime') "$0" fork stop "$name" ;;
-    'Review memories')
-      "$0" fork memories "$name" >/dev/null || return
-      item=$("$SELF_DIR/rtide-forks" --root "$root" status "$name" --json) || return
-      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
-      ${EDITOR:-nvim} "$path/.rtide/memory/.index-v2/index.json"
-      ;;
-    'Finish and remove')
-      if printf 'Finish %s and remove its worktree? [y/N] ' "$name" && IFS= read -r answer \
-          && [[ "$answer" =~ ^[Yy]$ ]]; then
-        "$0" fork remove "$name"
-      fi
-      ;;
-  esac
+  action=${action%%$'\t'*}
+  tmux display-popup -C 2>/dev/null || true
+  "$0" fork-menu-action "$action" "$name" "$pane"
 }
 
 cmd_fork_new_popup() {
@@ -1403,6 +1415,7 @@ case "${1:-}" in
     case "${2:-}" in list|resume|stop|status|finish|memories|remove) cmd_fork_manager "$@" ;; *) cmd_fork "$@" ;; esac
     exit 0 ;;
   fork-menu) cmd_fork_menu "$@"; exit 0 ;;
+  fork-menu-action) cmd_fork_menu_action "$@"; exit 0 ;;
   fork-new-popup) cmd_fork_new_popup "$@"; exit 0 ;;
   switch) cmd_pick ;;
   zoom)   cmd_zoom "$@" ;;

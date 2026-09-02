@@ -74,6 +74,10 @@ for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 
   grep -F "$action" <<< "$manager_source" >/dev/null \
     || fail "Fork Manager is missing lifecycle action: $action"
 done
+grep -F 'tmux display-popup -C' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager actions do not close the popup before dispatch'
+grep -F 'fork-menu-action' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager lacks an outside-popup action dispatcher'
 grep -F '● running' <<< "$manager_source" >/dev/null \
   || fail 'Fork Manager does not show runtime state'
 grep -F 'searchable_choice "$output" new' <<< "$manager_source" >/dev/null \
