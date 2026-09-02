@@ -36,6 +36,14 @@ grep -F '.rtide/agent-ready' "$ROOT/bin/rtide" >/dev/null \
 if grep -Fq "grep -Fq '● idle'" "$ROOT/bin/rtide"; then
   fail 'workspace launcher still waits for the obsolete idle label'
 fi
+fork_launch_source=$(sed -n '/^launch_fork_window()/,/^fork_root_from_context()/p' "$ROOT/bin/rtide")
+for signal in 'ready_nvim' 'ready_tweb' 'ready_agent'; do
+  grep -F "$signal" <<< "$fork_launch_source" >/dev/null \
+    || fail "fork launcher does not wait for $signal"
+done
+last_select=$(grep -n 'tmux select-window -t "$fork_window"' <<< "$fork_launch_source" | tail -1 | cut -d: -f1)
+ready_check=$(grep -n 'launch incomplete' <<< "$fork_launch_source" | tail -1 | cut -d: -f1)
+(( last_select > ready_check )) || fail 'fork window is selected before readiness completes'
 grep -F '"Fork Manager…"' "$ROOT/bin/rtide" >/dev/null \
   || fail 'actions menu does not expose the Fork Manager'
 grep -F 'Escape' "$ROOT/bin/rtide" >/dev/null \

@@ -260,6 +260,7 @@ fork_running_window() {
 launch_fork_window() {
   local sess="$1" fork_dir="$2" label="$3" initial_prompt="${4:-}"
   local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready marker
+  local ready_nvim=0 ready_tweb=0 ready_agent=0 deadline
   local running
   running=$(fork_running_window "$sess" "$fork_dir")
   if [[ -n "$running" ]]; then
@@ -296,6 +297,7 @@ launch_fork_window() {
     first_page="file://$fork_dir/.tweb/welcome.html"
   fi
   tmux send-keys -t "$tweb_pane" "tweb open '$first_page'" Enter
+  find "$fork_dir/.rtide/agent-ready" -maxdepth 0 -type f -delete 2>/dev/null || true
   tmux send-keys -t "$agent_pane" "$RTIDE_AGENT_CMD $harness $provider $model $fork_dir" Enter
   width=$(tmux display-message -p -t "$fork_window" '#{window_width}')
   tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
@@ -304,8 +306,28 @@ launch_fork_window() {
   tmux set-option -w -t "$fork_window" window-size latest 2>/dev/null || true
   tmux set-hook -w -t "$fork_window" after-resize-window \
     "run-shell '$RTIDE_CMD refresh-window $fork_window >/dev/null 2>&1'" 2>/dev/null || true
-  tmux select-window -t "$fork_window"
-  tmux select-pane -t "$agent_pane"
+  # Treat fork creation as one atomic launch. Do not return to the popup until
+  # editor, browser, and prompt are all usable; select the new window last so
+  # popup teardown cannot restore the originating window over it.
+  deadline=$((SECONDS + 15))
+  while (( SECONDS < deadline )); do
+    [[ -S "$fork_dir/.rtide/nvim.sock" ]] && ready_nvim=1
+    tweb status --pane "$tweb_pane" 2>/dev/null \
+      | grep -Fq "$first_page" && ready_tweb=1 || true
+    if [[ -f "$fork_dir/.rtide/agent-ready" ]]; then
+      ready_agent=1
+    else
+      tmux capture-pane -p -t "$agent_pane" -S -10 2>/dev/null \
+        | grep -Fq '● ready' && ready_agent=1 || true
+    fi
+    (( ready_nvim && ready_tweb && ready_agent )) && break
+    sleep 0.1
+  done
+  if ! (( ready_nvim && ready_tweb && ready_agent )); then
+    printf 'fork: launch incomplete (nvim=%s tweb=%s agent=%s)\n' \
+      "$ready_nvim" "$ready_tweb" "$ready_agent" >&2
+    return 1
+  fi
   if [[ -n "$initial_prompt" ]]; then
     ready=0
     for _ in $(seq 1 150); do
@@ -316,6 +338,8 @@ launch_fork_window() {
     tmux send-keys -t "$agent_pane" -l "$initial_prompt"
     tmux send-keys -t "$agent_pane" Enter
   fi
+  tmux select-window -t "$fork_window"
+  tmux select-pane -t "$agent_pane"
   echo "fork: resumed $label"
 }
 
@@ -393,6 +417,7 @@ cmd_fork_menu() {
       --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,3,4,6) || return 0
   IFS=$'\t' read -r name branch state ahead path memories <<< "$selected"
   if [[ "$branch" == new ]]; then
+    tmux display-popup -C 2>/dev/null || true
     cmd_fork_new_popup _ "$sess" "$window"
     return
   fi
