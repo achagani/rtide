@@ -22,6 +22,8 @@ export PATH="$ROOT/bin:$PATH"
 export RTIDE_ROOT="$ROOT"
 export RTIDE_CONFIG_DIR="$CONFIG_DIR"
 export RTIDE_SESSION_PREFIX="rtide-dev-"
+export RTIDE_DEV_MODE=1
+export RTIDE_DEV_LABEL="${RTIDE_DEV_LABEL:-DEVELOPMENT}"
 if (( $# )); then
   exec "$ROOT/bin/rtide" "$@"
 fi

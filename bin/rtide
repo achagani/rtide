@@ -36,6 +36,8 @@ CONFIG_DIR="${RTIDE_CONFIG_DIR:-$HOME/.rtide}"
 CONFIG="$CONFIG_DIR/config"
 WS_AGENT_FILE=".rtide/agent"   # per-workspace override, relative to the workspace dir
 SESSION_PREFIX="${RTIDE_SESSION_PREFIX:-rtide-}"
+DEV_MODE="${RTIDE_DEV_MODE:-0}"
+DEV_LABEL="${RTIDE_DEV_LABEL:-DEVELOPMENT}"
 printf -v RTIDE_CMD '%q' "$SCRIPT_PATH"
 printf -v RTIDE_AGENT_CMD '%q' "$SELF_DIR/rtide-agent"
 printf -v RTIDE_MEM_CMD '%q' "$SELF_DIR/rtide-mem"
@@ -1414,6 +1416,19 @@ fi
 tmux set-option -g mouse on
 tmux new-session -d -x "$START_W" -y "$START_H" -s "$S" -n work -c "$DIR"
 tmux set-option -w -t "$S:work" @rtide-workspace "$DIR"
+tmux set-environment -t "$S" RTIDE_DEV_MODE "$DEV_MODE"
+tmux set-environment -t "$S" RTIDE_DEV_LABEL "$DEV_LABEL"
+if [[ "$DEV_MODE" == 1 ]]; then
+  tmux set-option -t "$S" status on
+  tmux set-option -t "$S" status-style 'bg=#431407,fg=#fff7ed,bold'
+  tmux set-option -t "$S" status-left-length 64
+  tmux set-option -t "$S" status-left "#[bg=#fb923c,fg=#111827,bold]  DEV BUILD  #[bg=#431407,fg=#fff7ed] #S "
+  tmux set-option -t "$S" status-right "#[fg=#fdba74,bold]${DEV_LABEL} #[fg=#fed7aa]· v$(tr -d '[:space:]' < "$RTIDE_ROOT/VERSION") "
+  tmux set-option -w -t "$S:work" pane-border-status top
+  tmux set-option -w -t "$S:work" pane-border-style 'fg=#9a3412'
+  tmux set-option -w -t "$S:work" pane-active-border-style 'fg=#fb923c,bold'
+  tmux set-option -w -t "$S:work" pane-border-format '#[fg=#fdba74,bold] DEV #[fg=#fff7ed] #{pane_title} '
+fi
 NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
 tmux select-pane -t "$NVIM_PANE" -T nvim
@@ -1429,12 +1444,14 @@ tmux select-pane -t "$TWEB_PANE" -T tweb
 # Stable routing for harness command runners that do not inherit TMUX_PANE.
 printf '%s\n' "$TWEB_PANE" > "$DIR/.rtide/tweb-pane"
 # generate the per-workspace welcome page, then open it in tweb
-python3 - "$TWEB_DIR/welcome.html" "$DIR/.tweb/welcome.html" "$S" "$DIR" "$provider" "$harness" "$model" <<'PY'
+python3 - "$TWEB_DIR/welcome.html" "$DIR/.tweb/welcome.html" "$S" "$DIR" "$provider" "$harness" "$model" "$DEV_MODE" "$DEV_LABEL" <<'PY'
 import sys, datetime
-tpl, out, ws, path, prov, harness, model = sys.argv[1:8]
+tpl, out, ws, path, prov, harness, model, dev_mode, dev_label = sys.argv[1:10]
 html = open(tpl).read()
 for k, v in [("{{WORKSPACE}}", ws), ("{{PATH}}", path), ("{{PROVIDER}}", prov),
              ("{{HARNESS}}", harness), ("{{MODEL}}", model),
+             ("{{DEV_CLASS}}", "dev" if dev_mode == "1" else ""),
+             ("{{DEV_LABEL}}", dev_label),
              ("{{DATE}}", datetime.date.today().isoformat())]:
     html = html.replace(k, v)
 open(out, "w").write(html)

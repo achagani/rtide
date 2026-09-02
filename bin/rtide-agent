@@ -36,12 +36,16 @@ RED = "\033[31m"
 CYAN = "\033[36m"
 BLUE = "\033[34m"
 MAGENTA = "\033[35m"
+ORANGE = "\033[38;5;208m"
 DIM = "\033[2m"
 RESET = "\033[0m"
+DEV_MODE = os.environ.get("RTIDE_DEV_MODE") == "1"
+DEV_LABEL = os.environ.get("RTIDE_DEV_LABEL", "DEVELOPMENT")
+DEV_BADGE = f"{ORANGE}[DEV]{RESET} " if DEV_MODE else ""
 VOICE_CONTROL = f"\0337\033[999C\033[10D{MAGENTA}🎙 voice{RESET}\0338"
-PROMPT = (f"\001{CYAN}\002╰─❯\001{RESET}\002 "
+PROMPT = (f"\001{ORANGE if DEV_MODE else CYAN}\002╰─❯\001{RESET}\002 "
           f"\001{VOICE_CONTROL}\002")
-PROMPT_PLAIN = "╰─❯ " + VOICE_CONTROL
+PROMPT_PLAIN = DEV_BADGE + "╰─❯ " + VOICE_CONTROL
 
 # Turn input() into a real line editor: cursor movement, word movement, and
 # insertion at the cursor instead of an append/backspace-only cooked line.
@@ -256,7 +260,8 @@ def status(msg):
 
 
 def idle_status():
-    status(f"{DIM}╭─{RESET} {MAGENTA}RTIDE{RESET}  {GREEN}● ready{RESET}"
+    brand = f"{ORANGE}{DEV_LABEL}{RESET}" if DEV_MODE else f"{MAGENTA}RTIDE{RESET}"
+    status(f"{DIM}╭─{RESET} {brand}  {GREEN}● ready{RESET}"
            f" {DIM}· type, edit, or prefix+v to speak{RESET}")
 
 
@@ -285,12 +290,13 @@ def working_status(tool=None, elapsed=0, queued=0, reset_prompt=False):
     # ANSI sequences do not consume columns. Budget using only visible text,
     # and collapse tool arguments so a status can never wrap the 3-line pane.
     queue = f" q{queued}" if queued else ""
-    prefix = f"● working {timer}{queue}"
+    dev_prefix = "DEV " if DEV_MODE else ""
+    prefix = f"{dev_prefix}● working {timer}{queue}"
     width = shutil.get_terminal_size((80, 24)).columns
     room = max(0, width - len(prefix) - (3 if detail else 0))
     detail = detail[:room].rstrip()
     suffix = f" {DIM}·{RESET} {color}{detail}{RESET}" if detail else ""
-    line = (f"{YELLOW}●{RESET} working {CYAN}{timer}{RESET}"
+    line = (f"{DEV_BADGE}{YELLOW}●{RESET} working {CYAN}{timer}{RESET}"
             f"{MAGENTA}{queue}{RESET}{suffix}")
     if reset_prompt:
         # Keep a discoverable input line beneath the live status. This also

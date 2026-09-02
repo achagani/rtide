@@ -70,6 +70,12 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn("🎙 voice", AGENT.PROMPT)
         self.assertTrue(callable(AGENT.readline.redisplay))
 
+    def test_development_identity_is_environment_controlled(self):
+        with open(AGENT_PATH) as source_file:
+            source = source_file.read()
+        self.assertIn('os.environ.get("RTIDE_DEV_MODE") == "1"', source)
+        self.assertIn("DEV_BADGE", source)
+
     def test_request_context_is_expanded_by_default(self):
         page = AGENT.build_result_html("Original request", "Answer", "demo", 1)
         self.assertIn('<details class="request" open>', page)

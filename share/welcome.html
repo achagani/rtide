@@ -15,6 +15,23 @@
     margin: 0;
     padding: 2rem 1rem;
   }
+  .dev-ribbon { display: none; }
+  body.dev {
+    background: #160b06;
+    border-top: 8px solid #fb923c;
+  }
+  body.dev .dev-ribbon {
+    display: flex; align-items: center; justify-content: center; gap: 0.7rem;
+    position: sticky; top: 0; z-index: 20; width: min(100%, 900px);
+    margin: -2rem auto 1.5rem; padding: 0.65rem 1rem;
+    color: #111827; background: #fb923c; font-weight: 900;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    box-shadow: 0 12px 32px #0009;
+  }
+  body.dev .dev-ribbon small { font-weight: 700; letter-spacing: 0.03em; text-transform: none; }
+  body.dev .brand-mark { filter: sepia(1) saturate(5) hue-rotate(335deg) drop-shadow(0 18px 32px #fb923c55); }
+  body.dev .wordmark span, body.dev h2, body.dev .stat .num { color: #fb923c; }
+  body.dev .card, body.dev .stat, body.dev blockquote { border-color: #9a3412; background: #24110a; }
   main { max-width: 900px; margin: 0 auto; }
   .hero { text-align: center; padding: 2.5rem 0 1.5rem; }
   .brand-mark {
@@ -50,7 +67,8 @@
   .footer { text-align: center; color: #484f58; font-size: 0.8rem; margin-top: 3rem; }
 </style>
 </head>
-<body>
+<body class="{{DEV_CLASS}}">
+<div class="dev-ribbon" role="status"><span>⚠ {{DEV_LABEL}}</span><small>editable source checkout</small></div>
 <main>
   <div class="hero">
     <img class="brand-mark" src="assets/rtide-mark.png" alt="RTIDE terminal and rich-media mark" width="168" height="168">
