@@ -76,6 +76,25 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn('os.environ.get("RTIDE_DEV_MODE") == "1"', source)
         self.assertIn("DEV_BADGE", source)
 
+    def test_window_activity_animates_and_restores_base_name(self):
+        location = mock.Mock(returncode=0, stdout="@7\tfeature-one\n")
+        stored = mock.Mock(returncode=0, stdout="feature-one\n")
+        calls = [location, stored]
+        def fake_run(*args, **kwargs):
+            return calls.pop(0) if calls else mock.Mock(returncode=0, stdout="")
+        with mock.patch.dict(os.environ, {"TMUX_PANE": "%9"}), \
+                mock.patch.object(AGENT.subprocess, "run",
+                                  side_effect=fake_run) as run:
+            activity = AGENT.WindowActivity(interval=0.01)
+            self.assertTrue(activity.start())
+            activity.stop_event.wait(0.03)
+            activity.stop()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertTrue(any(cmd[:2] == ["tmux", "rename-window"] and
+                            cmd[-1].endswith(" feature-one") for cmd in commands))
+        self.assertEqual(commands[-1], ["tmux", "rename-window", "-t", "@7",
+                                        "feature-one"])
+
     def test_request_context_is_expanded_by_default(self):
         page = AGENT.build_result_html("Original request", "Answer", "demo", 1)
         self.assertIn('<details class="request" open>', page)

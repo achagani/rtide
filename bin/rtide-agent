@@ -165,6 +165,66 @@ def managed_tweb_pane():
     return matches[0] if len(matches) == 1 else None
 
 
+class WindowActivity:
+    """Animate the current tmux window title without losing its base name."""
+
+    FRAMES = ("◐", "◓", "◑", "◒")
+
+    def __init__(self, interval=0.24):
+        self.interval = interval
+        self.window = None
+        self.base = None
+        self.stop_event = threading.Event()
+        self.thread = None
+
+    def start(self):
+        pane = os.environ.get("TMUX_PANE", "")
+        if not pane or self.thread:
+            return False
+        location = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane,
+             "#{window_id}\t#{window_name}"],
+            capture_output=True, text=True,
+        )
+        fields = location.stdout.rstrip("\n").split("\t", 1)
+        if location.returncode or len(fields) != 2:
+            return False
+        self.window, current = fields
+        stored = subprocess.run(
+            ["tmux", "show-options", "-w", "-v", "-t", self.window,
+             "@rtide-window-name"], capture_output=True, text=True,
+        ).stdout.strip()
+        self.base = stored or current
+        subprocess.run(["tmux", "set-option", "-w", "-t", self.window,
+                        "@rtide-window-name", self.base],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["tmux", "set-option", "-w", "-t", self.window,
+                        "automatic-rename", "off"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._animate, daemon=True)
+        self.thread.start()
+        return True
+
+    def _animate(self):
+        index = 0
+        while not self.stop_event.is_set():
+            subprocess.run(["tmux", "rename-window", "-t", self.window,
+                            f"{self.FRAMES[index % len(self.FRAMES)]} {self.base}"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            index += 1
+            self.stop_event.wait(self.interval)
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join(timeout=max(1.0, self.interval * 2))
+        if self.window and self.base:
+            subprocess.run(["tmux", "rename-window", "-t", self.window, self.base],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.thread = None
+
+
 def fork_command(arguments):
     """Create an isolated fork window and submit prompt after it is ready."""
     pane = os.environ.get("TMUX_PANE", "")
@@ -1005,6 +1065,8 @@ def main():
 
         clear()
         working_status(elapsed=0, queued=len(pending), reset_prompt=True)
+        window_activity = WindowActivity()
+        window_activity.start()
         t0 = time.time()
         marker = render_marker_path()
         render_before = marker_version(marker)
@@ -1018,6 +1080,7 @@ def main():
                 cmd, harness, working_status, last_request, len(pending)
             )
         except Exception as e:
+            window_activity.stop()
             clear()
             error_status(str(e))
             continue
@@ -1028,6 +1091,7 @@ def main():
         pending.extend(newly_queued)
         if steer:
             pending.insert(0, steer)
+        window_activity.stop()
         if steer or interrupted:
             clear()
             if steer:

@@ -257,6 +257,8 @@ launch_fork_window() {
   tweb_pct="${tweb_pct:-60}"; shell="${shell:-bash}"
   fork_window=$(tmux new-window -d -P -F '#{window_id}' -t "$sess:" -n "$label" -c "$fork_dir")
   tmux set-option -w -t "$fork_window" @rtide-workspace "$fork_dir"
+  tmux set-option -w -t "$fork_window" @rtide-window-name "$label"
+  tmux set-option -w -t "$fork_window" automatic-rename off
   nvim_pane=$(tmux list-panes -t "$fork_window" -F '#{pane_id}' | head -1)
   tmux set-option -p -t "$nvim_pane" @rtide-role nvim
   tmux select-pane -t "$nvim_pane" -T nvim
@@ -1432,6 +1434,8 @@ fi
 tmux set-option -g mouse on
 tmux new-session -d -x "$START_W" -y "$START_H" -s "$S" -n work -c "$DIR"
 tmux set-option -w -t "$S:work" @rtide-workspace "$DIR"
+tmux set-option -w -t "$S:work" @rtide-window-name work
+tmux set-option -w -t "$S:work" automatic-rename off
 tmux set-environment -t "$S" RTIDE_DEV_MODE "$DEV_MODE"
 tmux set-environment -t "$S" RTIDE_DEV_LABEL "$DEV_LABEL"
 if [[ "$DEV_MODE" == 1 ]]; then
