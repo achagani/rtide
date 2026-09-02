@@ -26,6 +26,7 @@ check:
 	git diff --check
 
 test: check
+	./tests/test-picker-contract.sh
 	./tests/test-output-routing.sh
 	./tests/test-fork.sh
 	python3 -m unittest tests/test-agent-status.py

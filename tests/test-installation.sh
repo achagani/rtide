@@ -76,6 +76,11 @@ for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 
 done
 grep -F '● running' <<< "$manager_source" >/dev/null \
   || fail 'Fork Manager does not show runtime state'
+grep -F 'searchable_choice "$output" new' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager does not create an unknown search query'
+workspace_picker=$(sed -n '/^cmd_pick()/,/^cmd_sweep()/p' "$ROOT/bin/rtide")
+grep -F 'searchable_choice "$out" workspace' <<< "$workspace_picker" >/dev/null \
+  || fail 'workspace picker does not share searchable-create behavior'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null

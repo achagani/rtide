@@ -87,6 +87,24 @@ providers_for_installed() {
 # Free text is allowed: with fzf, a query that matches nothing is used as the answer.
 RTIDE_CANCELLED=0
 
+# Decode fzf --print-query output using RTIDE's searchable-create contract:
+# selected existing row wins; otherwise a non-empty query is a create name;
+# empty query with the explicit create row requests automatic naming.
+searchable_choice() {
+  local output="$1" create_token="$2" query selected
+  query=$(printf '%s\n' "$output" | head -1)
+  selected=$(printf '%s\n' "$output" | tail -1)
+  if [[ -n "$selected" && "$selected" != *$'\t'"$create_token"$'\t'* ]]; then
+    printf 'open\t%s\n' "$selected"
+  elif [[ -n "$query" ]]; then
+    printf 'create\t%s\n' "$query"
+  elif [[ "$selected" == *$'\t'"$create_token"$'\t'* ]]; then
+    printf 'create\t\n'
+  else
+    printf 'cancel\t\n'
+  fi
+}
+
 cancellable_input() {
   local prompt="$1" def="${2:-}" result
   RTIDE_CANCELLED=0
@@ -398,13 +416,13 @@ cmd_fork_manager() {
 }
 
 cmd_fork_menu() {
-  local pane="${2:-${TMUX_PANE:-}}" sess window root selected name branch state ahead path memories action running label
+  local pane="${2:-${TMUX_PANE:-}}" sess window root output decision mode selected name branch state ahead path memories action running label
   [[ -n "$pane" ]] || return 1
   sess=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
   window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
   root=$(fork_root_from_context "$pane") || { echo "fork: not in a Git repository" >&2; return 1; }
   command -v fzf >/dev/null 2>&1 || { echo "fork: fzf is required for the visual manager" >&2; return 1; }
-  selected=$({
+  output=$({
       printf '＋ Create new fork\tnew\t\t\t\t\n'
       while IFS=$'\t' read -r name branch state ahead path memories; do
         running=$(fork_running_window "$sess" "$path")
@@ -412,15 +430,20 @@ cmd_fork_menu() {
         printf '%s\t%s\t%s · %s\t%s\t%s\t%s\n' "$name" "$branch" "$label" "$state" "$ahead" "$path" "$memories"
       done < <("$SELF_DIR/rtide-forks" --root "$root" list)
     } \
-    | fzf --ansi --layout=reverse --border=rounded --height=100% \
-      --header=$'Fork Manager · create, resume, inspect, or stop\nEnter = select   type = filter   Esc = close' \
+    | fzf --ansi --print-query --layout=reverse --border=rounded --height=100% \
+      --bind='enter:accept-or-print-query' \
+      --header=$'Fork Manager · create, resume, inspect, or stop\nEnter = open match or create query   Esc = close' \
       --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,3,4,6) || return 0
-  IFS=$'\t' read -r name branch state ahead path memories <<< "$selected"
-  if [[ "$branch" == new ]]; then
+  decision=$(searchable_choice "$output" new)
+  mode=${decision%%$'\t'*}
+  selected=${decision#*$'\t'}
+  if [[ "$mode" == create ]]; then
     tmux display-popup -C 2>/dev/null || true
-    cmd_fork_new_popup _ "$sess" "$window"
+    "$0" fork "$sess" "$window" "$selected"
     return
   fi
+  [[ "$mode" == open ]] || return 0
+  IFS=$'\t' read -r name branch state ahead path memories <<< "$selected"
   action=$(printf '%s\n' \
     'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish and remove' \
     | fzf --layout=reverse --border=rounded --height=100% \
@@ -632,8 +655,7 @@ resume_session() {
 # `rtide switch`. Sessions are listed with their directory (`#{session_path}` —
 # every workspace is created with `-c "$DIR"`); the one matching the current
 # working directory is sorted first and marked, so Enter resumes it directly.
-# Typing a name that matches nothing only searches — creation happens via the
-# `+ new workspace` row (or typing `new`), never by typing an unknown name.
+# Enter opens an existing match or creates a workspace for an unknown query.
 cmd_pick() {
   local sessions cur s dir sdir disp
   local -a items=()
@@ -658,10 +680,10 @@ cmd_pick() {
       items+=("$s"$'\t'"$disp")
     fi
   done <<< "$sessions"
-  items+=("${CYAN}+${RESET} new workspace")
+  items+=("${CYAN}+${RESET} new workspace"$'\tworkspace\t')
 
   if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
-    local out qry sel sess rc
+    local out decision mode qry sel sess rc
     while true; do
       # `if` so `set -e` doesn't kill us on fzf's non-zero exits; rc tells
       # abort (130 = Esc/Ctrl-C) apart from no-match (1 = Enter on a query
@@ -669,7 +691,8 @@ cmd_pick() {
       if out=$(printf '%s\n' "${items[@]}" | fzf --ansi --print-query \
             --no-sort --layout=reverse --header-first \
             --color='bg:#202334,bg+:#313244,fg:#cdd6f4,fg+:#f5e0dc,hl:#89dceb,hl+:#f5c2e7,border:#cba6f7,prompt:#89dceb,pointer:#f5c2e7,marker:#a6e3a1,header:#94e2d5,info:#a6adc8' \
-            --header=$'RTIDE — resume a workspace\nEnter = open   type "new" + Enter = start one   Esc = quit' \
+            --bind='enter:accept-or-print-query' \
+            --header=$'RTIDE — open or create a workspace\nEnter = open match or create query   Esc = quit' \
             --prompt='❯ ' --height=60% --border \
             --preview-window=right:40% \
             --preview 's={1}; if tmux has-session -t "$s" 2>/dev/null; then d=$(tmux list-panes -t "$s" -F "#{pane_current_path}" 2>/dev/null | head -1); [ -z "$d" ] && d=$(tmux display-message -p -t "$s" "#{session_path}"); echo "dir: $d"; [ -f "$d/.rtide/agent" ] && { echo; echo "agent:"; sed "s/^/    /" "$d/.rtide/agent"; }; act=$(tmux display-message -p -t "$s" "#{session_activity}"); [ -n "$act" ] && act=$(date -d "@$act" "+%H:%M  %a %d %b"); echo; echo "last: ${act:-?}   ·   $(tmux display-message -p -t "$s" "#{session_windows}")w  $(tmux display-message -p -t "$s" "#{session_attached}")attached"; tmux list-panes -t "$s" -F "    #{@rtide-role}   #{pane_width}x#{pane_height}"; else echo "start a new workspace (Enter)"; fi' ); then
@@ -678,28 +701,22 @@ cmd_pick() {
         rc=$?
       fi
       (( rc == 130 )) && exit 0      # Esc / Ctrl-C → quit
-      qry=$(printf '%s\n' "$out" | head -1)
-      sel=$(printf '%s\n' "$out" | tail -1)
-      [[ -z "$sel" ]] && exit 0      # empty selection
-      if [[ "$sel" == *"new workspace"* ]]; then
-        # The create row itself is fuzzy-searchable: e.g. "nope" matches
-        # n→o→p→e in "new workspace". Only an empty query (the user moved
-        # onto the row) or an explicit "new…" query expresses create intent.
-        if [[ -z "$qry" || "$qry" == new* ]]; then
-          exec "$0" new
-        fi
-      else
+      decision=$(searchable_choice "$out" workspace)
+      mode=${decision%%$'\t'*}
+      sel=${decision#*$'\t'}
+      if [[ "$mode" == create ]]; then
+        [[ -n "$sel" ]] && exec "$0" "$sel"
+        exec "$0" new
+      elif [[ "$mode" == open ]]; then
         sess=$(printf '%s' "$sel" | cut -f1)
         if tmux has-session -t "$sess" 2>/dev/null; then
           resume_session "$sess" \
             || echo "could not open $sess — attach with: tmux attach -t $sess" >&2
           exit 0
         fi
+      else
+        exit 0
       fi
-      # No match, including accidental fuzzy matches against the create row:
-      # unknown names search only and never create.
-      printf "no workspace matches '%s' — type 'new' to create one\n" "$qry" >&2
-      sleep 1
     done
   elif [[ -t 0 ]]; then
     # fallback: numbered list (accept number or session name), Enter = first

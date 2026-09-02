@@ -71,6 +71,13 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 - Treat a queued render and a visually acknowledged upper-pane render as different
   states. Report the warning if the pane cannot be verified instead of claiming it displayed.
 
+## Searchable picker contract
+- Searchable create-or-open interfaces must behave consistently: Enter opens an
+  existing selected match; Enter on a non-matching query creates that exact query;
+  Enter on the explicit create row starts automatic/guided creation; Escape cancels.
+- Selection-only interfaces must say so and reject unknown values. Free-form fields
+  may accept unmatched queries but must not silently substitute a highlighted default.
+
 ## Tools
 - `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb
 - `tweb-run <cmd>` — run a program, render its output in tweb (exit code, duration)
