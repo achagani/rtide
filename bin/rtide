@@ -344,28 +344,44 @@ cmd_fork_manager() {
       "$SELF_DIR/rtide-memory-index" "$path/.rtide/memory" --scope fork
       echo "fork: memory review data is in $path/.rtide/memory/.index-v2/index.json"
       ;;
-    *) echo "usage: rtide fork list|resume|stop|status|finish [name]" >&2; return 2 ;;
+    remove)
+      item=$("$SELF_DIR/rtide-forks" --root "$root" status "${selector:?usage: rtide fork remove <name>}" --json) || return
+      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
+      "$SELF_DIR/rtide-forks" --root "$root" check-finish "$selector" || return
+      window=$(fork_running_window "$sess" "$path")
+      [[ -z "$window" ]] || { echo "fork: stop the runtime before finishing: $selector" >&2; return 2; }
+      git -C "$root" worktree remove "$path"
+      echo "fork: finished and removed $selector"
+      ;;
+    *) echo "usage: rtide fork list|resume|stop|status|memories|finish|remove [name]" >&2; return 2 ;;
   esac
 }
 
 cmd_fork_menu() {
-  local pane="${2:-${TMUX_PANE:-}}" sess window root selected name branch state ahead path action
+  local pane="${2:-${TMUX_PANE:-}}" sess window root selected name branch state ahead path memories action running label
   [[ -n "$pane" ]] || return 1
   sess=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
   window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
   root=$(fork_root_from_context "$pane") || { echo "fork: not in a Git repository" >&2; return 1; }
   command -v fzf >/dev/null 2>&1 || { echo "fork: fzf is required for the visual manager" >&2; return 1; }
-  selected=$({ printf '＋ Create new fork\tnew\t\t\t\n'; "$SELF_DIR/rtide-forks" --root "$root" list; } \
+  selected=$({
+      printf '＋ Create new fork\tnew\t\t\t\t\n'
+      while IFS=$'\t' read -r name branch state ahead path memories; do
+        running=$(fork_running_window "$sess" "$path")
+        label=$([[ -n "$running" ]] && printf '● running' || printf '○ stopped')
+        printf '%s\t%s\t%s · %s\t%s\t%s\t%s\n' "$name" "$branch" "$label" "$state" "$ahead" "$path" "$memories"
+      done < <("$SELF_DIR/rtide-forks" --root "$root" list)
+    } \
     | fzf --ansi --layout=reverse --border=rounded --height=100% \
       --header=$'Fork Manager · create, resume, inspect, or stop\nEnter = select   type = filter   Esc = close' \
-      --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,3,4) || return 0
-  IFS=$'\t' read -r name branch state ahead path <<< "$selected"
+      --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,3,4,6) || return 0
+  IFS=$'\t' read -r name branch state ahead path memories <<< "$selected"
   if [[ "$branch" == new ]]; then
     cmd_fork_new_popup _ "$sess" "$window"
     return
   fi
   action=$(printf '%s\n' \
-    'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish fork' \
+    'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish and remove' \
     | fzf --layout=reverse --border=rounded --height=100% \
       --header=$'Fork actions\n'"$name · $state · $ahead" \
       --prompt='action ❯ ') || return 0
@@ -373,8 +389,18 @@ cmd_fork_menu() {
     'Resume or switch') "$0" fork resume "$name" ;;
     'View status') "$0" fork status "$name" | less -R ;;
     'Stop runtime') "$0" fork stop "$name" ;;
-    'Review memories') "$0" fork memories "$name" ;;
-    'Finish fork') "$0" fork finish "$name" ;;
+    'Review memories')
+      "$0" fork memories "$name" >/dev/null || return
+      item=$("$SELF_DIR/rtide-forks" --root "$root" status "$name" --json) || return
+      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
+      ${EDITOR:-nvim} "$path/.rtide/memory/.index-v2/index.json"
+      ;;
+    'Finish and remove')
+      if printf 'Finish %s and remove its worktree? [y/N] ' "$name" && IFS= read -r answer \
+          && [[ "$answer" =~ ^[Yy]$ ]]; then
+        "$0" fork remove "$name"
+      fi
+      ;;
   esac
 }
 
@@ -1301,7 +1327,7 @@ case "${1:-}" in
   doctor) cmd_doctor; exit 0 ;;
   new)    cmd_new ;;
   fork)
-    case "${2:-}" in list|resume|stop|status|finish|memories) cmd_fork_manager "$@" ;; *) cmd_fork "$@" ;; esac
+    case "${2:-}" in list|resume|stop|status|finish|memories|remove) cmd_fork_manager "$@" ;; *) cmd_fork "$@" ;; esac
     exit 0 ;;
   fork-menu) cmd_fork_menu "$@"; exit 0 ;;
   fork-new-popup) cmd_fork_new_popup "$@"; exit 0 ;;

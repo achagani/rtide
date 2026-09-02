@@ -57,6 +57,16 @@ class ForkManagerTests(unittest.TestCase):
         self.assertEqual(items[0]["name"], "feature-one")
         self.assertEqual(items[0]["request"], "Build feature one")
         self.assertFalse(items[0]["dirty"])
+        self.assertEqual(items[0]["pending_memories"], 0)
+
+    def test_list_reports_pending_fork_memories(self):
+        index = self.fork / ".rtide" / "memory" / ".index-v2"
+        index.mkdir(parents=True)
+        (index / "index.json").write_text(json.dumps({"entries": [
+            {"review": "pending"}, {"review": "reviewed"}, {"review": "pending"}
+        ]}))
+        result = self.run_helper("list", "--json")
+        self.assertEqual(json.loads(result.stdout)[0]["pending_memories"], 2)
 
     def test_status_accepts_name_branch_and_path(self):
         for selector in ("feature-one", "feature/one", str(self.fork)):

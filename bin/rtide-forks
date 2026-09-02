@@ -49,6 +49,15 @@ def first_request(path: Path) -> str:
     return ""
 
 
+def pending_memories(path: Path) -> int:
+    index = path / ".rtide" / "memory" / ".index-v2" / "index.json"
+    try:
+        entries = json.loads(index.read_text(encoding="utf-8")).get("entries", [])
+    except (OSError, ValueError, AttributeError):
+        return 0
+    return sum(entry.get("review") == "pending" for entry in entries)
+
+
 def worktrees(root: Path) -> list[dict[str, object]]:
     primary = primary_root(root)
     records: list[dict[str, object]] = []
@@ -81,6 +90,7 @@ def worktrees(root: Path) -> list[dict[str, object]]:
                             "created": origin.get("created", ""),
                             "source": origin.get("source", ""),
                             "request": first_request(path),
+                            "pending_memories": pending_memories(path),
                             "session_file": str(path / ".rtide" / "agent-session"),
                         }
                     )
@@ -134,7 +144,7 @@ def main() -> int:
             else:
                 for item in items:
                     state = "modified" if item["dirty"] else "clean"
-                    print(f"{item['name']}\t{item['branch']}\t{state}\t{item['ahead']} ahead\t{item['path']}")
+                    print(f"{item['name']}\t{item['branch']}\t{state}\t{item['ahead']} ahead\t{item['path']}\t{item['pending_memories']} memories")
             return 0
         item = resolve(items, args.selector)
         if args.command == "status":

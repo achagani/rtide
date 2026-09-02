@@ -44,6 +44,12 @@ manager_source=$(sed -n '/^cmd_fork_menu()/,/^cmd_fork_new_popup()/p' "$ROOT/bin
 if grep -F -- '--preview-window=right:' <<< "$manager_source" >/dev/null; then
   fail 'Fork Manager still uses a clipping side preview'
 fi
+for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish and remove'; do
+  grep -F "$action" <<< "$manager_source" >/dev/null \
+    || fail "Fork Manager is missing lifecycle action: $action"
+done
+grep -F '● running' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager does not show runtime state'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
