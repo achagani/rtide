@@ -429,6 +429,7 @@ cmd_fork_new_popup() {
   # returns non-zero and creates nothing.
   result=$(printf '\n' | fzf --print-query --query='' --layout=reverse \
     --border=rounded --height=100% --no-info --prompt='name ❯ ' \
+    --bind='enter:accept-or-print-query' \
     --header=$'Name this fork\nEnter = create automatically or use typed name   Esc = cancel') || return 0
   name=$(printf '%s\n' "$result" | head -1)
   "$0" fork "$sess" "$window" "$name"

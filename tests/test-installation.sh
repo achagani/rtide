@@ -38,6 +38,8 @@ grep -F 'Escape' "$ROOT/bin/rtide" >/dev/null \
 name_source=$(sed -n '/^cmd_fork_new_popup()/,/^cmd_fork()/p' "$ROOT/bin/rtide")
 grep -F 'fzf --print-query' <<< "$name_source" >/dev/null \
   || fail 'new fork prompt does not use native cancellable input'
+grep -F 'enter:accept-or-print-query' <<< "$name_source" >/dev/null \
+  || fail 'new fork prompt cannot submit a typed name without a list match'
 if grep -F 'read -r -e name' <<< "$name_source" >/dev/null; then
   fail 'new fork prompt still depends on inherited readline bindings'
 fi
