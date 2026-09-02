@@ -33,8 +33,14 @@ grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
   || fail 'development welcome theme is missing'
 grep -F '"Fork Manager…"' "$ROOT/bin/rtide" >/dev/null \
   || fail 'actions menu does not expose the Fork Manager'
-grep -F 'abort-current-line' "$ROOT/bin/rtide" >/dev/null \
-  || fail 'new fork popup does not bind Escape to cancel'
+grep -F 'Escape' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'new fork prompt does not document Escape cancellation'
+name_source=$(sed -n '/^cmd_fork_new_popup()/,/^cmd_fork()/p' "$ROOT/bin/rtide")
+grep -F 'fzf --print-query' <<< "$name_source" >/dev/null \
+  || fail 'new fork prompt does not use native cancellable input'
+if grep -F 'read -r -e name' <<< "$name_source" >/dev/null; then
+  fail 'new fork prompt still depends on inherited readline bindings'
+fi
 grep -F '＋ Create new fork' "$ROOT/bin/rtide" >/dev/null \
   || fail 'Fork Manager does not include fork creation'
 if grep -F '"New fork…"' "$ROOT/bin/rtide" >/dev/null; then

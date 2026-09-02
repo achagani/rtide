@@ -405,16 +405,16 @@ cmd_fork_menu() {
 }
 
 cmd_fork_new_popup() {
-  local sess="${2:-}" window="${3:-}" name
+  local sess="${2:-}" window="${3:-}" result name
   [[ -n "$sess" && -n "$window" ]] || { echo "fork: missing workspace context" >&2; return 2; }
-  printf 'Fork name (empty = automatic, Esc = cancel): '
-  # `read -e` uses readline. The popup shell binds Escape to
-  # abort-current-line, causing this read to return non-zero immediately.
-  if ! IFS= read -r -e name; then
-    printf '\n'
-    return 0
-  fi
-  printf '\n'
+  command -v fzf >/dev/null 2>&1 || { echo "fork: fzf is required for naming" >&2; return 1; }
+  # Native fzf cancellation is reliable whether this function is called as a
+  # command or nested inside Fork Manager. Enter submits the query; Escape
+  # returns non-zero and creates nothing.
+  result=$(printf '\n' | fzf --print-query --query='' --layout=reverse \
+    --border=rounded --height=100% --no-info --prompt='name ❯ ' \
+    --header=$'Name this fork\nEnter = create automatically or use typed name   Esc = cancel') || return 0
+  name=$(printf '%s\n' "$result" | head -1)
   "$0" fork "$sess" "$window" "$name"
 }
 
