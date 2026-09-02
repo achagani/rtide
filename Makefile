@@ -11,7 +11,7 @@ BASH_SOURCES := install.sh \
 	bin/rtide-provider bin/rtide-tweb-common bin/tweb-render bin/tweb-run \
 	scripts/check-version-bump scripts/install-user scripts/rtide-dev \
 	scripts/rtide-launcher scripts/stage-package
-PYTHON_SOURCES := bin/rtide-agent bin/rtide-dictate scripts/bump-version \
+PYTHON_SOURCES := bin/rtide-agent bin/rtide-dictate bin/rtide-fork-status scripts/bump-version \
 	bin/rtide-forks bin/rtide-memory-index scripts/package-tool \
 	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py \
 	tests/test-progress.py
@@ -29,6 +29,7 @@ check:
 test: check
 	./tests/test-picker-contract.sh
 	./tests/test-fork-snapshot.sh
+	./tests/test-fork-launch-status.sh
 	./tests/test-output-routing.sh
 	./tests/test-fork.sh
 	python3 -m unittest tests/test-agent-status.py

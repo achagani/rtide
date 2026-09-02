@@ -270,10 +270,20 @@ validate_fork_snapshot() {
   done < <(sed -n 's/.*SELF_DIR\/\([^"$ ]*\).*/bin\/\1/p' "$root/bin/rtide" | sort -u)
 }
 
+write_fork_launch_status() {
+  local path="$1" state="$2" stage="$3" nvim="$4" tweb="$5" agent="$6" message="${7:-}"
+  "$SELF_DIR/rtide-fork-status" "$path" "$state" "$stage" "$nvim" "$tweb" "$agent" "$message"
+}
+
+fork_launch_notice() {
+  local pane="$1" message="$2"
+  tmux display-message -d 8000 -t "$pane" "$message" 2>/dev/null || true
+}
+
 launch_fork_window() {
   local sess="$1" fork_dir="$2" label="$3" initial_prompt="${4:-}"
   local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready marker
-  local ready_nvim=0 ready_tweb=0 ready_agent=0 deadline
+  local ready_nvim=0 ready_tweb=0 ready_agent=0 deadline status_file log_file failed
   local running
   running=$(fork_running_window "$sess" "$fork_dir")
   if [[ -n "$running" ]]; then
@@ -281,11 +291,17 @@ launch_fork_window() {
     echo "fork: switched to $label"
     return 0
   fi
+  status_file="$fork_dir/.rtide/fork-launch.json"
+  log_file="$fork_dir/.rtide/fork-launch.log"
+  mkdir -p "$fork_dir/.rtide"
+  : > "$log_file"
+  write_fork_launch_status "$status_file" starting configure 0 0 0 "Preparing fork runtime"
   [[ -f "$CONFIG" ]] && source "$CONFIG"
   [[ -f "$fork_dir/.rtide/agent" ]] && source "$fork_dir/.rtide/agent"
   harness="${harness:-${agent:-}}"; agent_lines="${agent_lines:-3}"
   tweb_pct="${tweb_pct:-60}"; shell="${shell:-bash}"
   fork_window=$(tmux new-window -d -P -F '#{window_id}' -t "$sess:" -n "$label" -c "$fork_dir")
+  printf 'window=%s\n' "$fork_window" >> "$log_file"
   tmux set-option -w -t "$fork_window" @rtide-workspace "$fork_dir"
   tmux set-option -w -t "$fork_window" @rtide-window-name "$label"
   tmux set-option -w -t "$fork_window" automatic-rename off
@@ -312,6 +328,9 @@ launch_fork_window() {
   tmux send-keys -t "$tweb_pane" "tweb open '$first_page'" Enter
   find "$fork_dir/.rtide/agent-ready" -maxdepth 0 -type f -delete 2>/dev/null || true
   tmux send-keys -t "$agent_pane" "$RTIDE_AGENT_CMD $harness $provider $model $fork_dir" Enter
+  printf 'nvim_pane=%s\nagent_pane=%s\ntweb_pane=%s\npage=%s\n' \
+    "$nvim_pane" "$agent_pane" "$tweb_pane" "$first_page" >> "$log_file"
+  write_fork_launch_status "$status_file" waiting readiness 0 0 0 "Waiting for nvim, tweb, and agent"
   width=$(tmux display-message -p -t "$fork_window" '#{window_width}')
   tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
   tmux resize-pane -t "$agent_pane" -y "$agent_lines"
@@ -324,21 +343,46 @@ launch_fork_window() {
   # popup teardown cannot restore the originating window over it.
   deadline=$((SECONDS + 15))
   while (( SECONDS < deadline )); do
-    [[ -S "$fork_dir/.rtide/nvim.sock" ]] && ready_nvim=1
+    if (( ! ready_nvim )) && [[ -S "$fork_dir/.rtide/nvim.sock" ]]; then
+      ready_nvim=1; printf 'ready=nvim\n' >> "$log_file"
+      write_fork_launch_status "$status_file" waiting readiness "$ready_nvim" "$ready_tweb" "$ready_agent" "nvim ready"
+    fi
     tweb status --pane "$tweb_pane" 2>/dev/null \
-      | grep -Fq "$first_page" && ready_tweb=1 || true
+      | grep -Fq "$first_page" && {
+          if (( ! ready_tweb )); then
+            ready_tweb=1; printf 'ready=tweb\n' >> "$log_file"
+            write_fork_launch_status "$status_file" waiting readiness "$ready_nvim" "$ready_tweb" "$ready_agent" "tweb ready"
+          fi
+        } || true
     if [[ -f "$fork_dir/.rtide/agent-ready" ]]; then
-      ready_agent=1
+      if (( ! ready_agent )); then
+        ready_agent=1; printf 'ready=agent marker\n' >> "$log_file"
+        write_fork_launch_status "$status_file" waiting readiness "$ready_nvim" "$ready_tweb" "$ready_agent" "agent ready"
+      fi
     else
       tmux capture-pane -p -t "$agent_pane" -S -10 2>/dev/null \
-        | grep -Fq '● ready' && ready_agent=1 || true
+        | grep -Fq '● ready' && {
+            if (( ! ready_agent )); then
+              ready_agent=1; printf 'ready=agent pane\n' >> "$log_file"
+              write_fork_launch_status "$status_file" waiting readiness "$ready_nvim" "$ready_tweb" "$ready_agent" "agent ready"
+            fi
+          } || true
     fi
     (( ready_nvim && ready_tweb && ready_agent )) && break
     sleep 0.1
   done
   if ! (( ready_nvim && ready_tweb && ready_agent )); then
-    printf 'fork: launch incomplete (nvim=%s tweb=%s agent=%s)\n' \
-      "$ready_nvim" "$ready_tweb" "$ready_agent" >&2
+    failed=""
+    (( ready_nvim )) || failed="${failed} nvim"
+    (( ready_tweb )) || failed="${failed} tweb"
+    (( ready_agent )) || failed="${failed} agent"
+    tmux capture-pane -p -t "$nvim_pane" -S -40 > "$fork_dir/.rtide/fork-launch-nvim.log" 2>&1 || true
+    tmux capture-pane -p -t "$tweb_pane" -S -40 > "$fork_dir/.rtide/fork-launch-tweb.log" 2>&1 || true
+    tmux capture-pane -p -t "$agent_pane" -S -80 > "$fork_dir/.rtide/fork-launch-agent.log" 2>&1 || true
+    printf 'failed=%s\n' "${failed# }" >> "$log_file"
+    write_fork_launch_status "$status_file" failed readiness "$ready_nvim" "$ready_tweb" "$ready_agent" "Timed out waiting for:${failed}"
+    fork_launch_notice "$fork_window" "RTIDE fork '$label' failed:${failed} · $status_file"
+    printf 'fork: launch incomplete; failed:%s (status: %s)\n' "$failed" "$status_file" >&2
     return 1
   fi
   if [[ -n "$initial_prompt" ]]; then
@@ -347,12 +391,21 @@ launch_fork_window() {
       if tmux capture-pane -p -t "$agent_pane" -S -6 2>/dev/null | grep -q '╰─❯'; then ready=1; break; fi
       sleep 0.1
     done
-    (( ready )) || { echo "fork: new prompt pane did not become ready" >&2; return 1; }
+    if (( ! ready )); then
+      write_fork_launch_status "$status_file" failed prompt 1 1 1 "Agent prompt did not become interactive"
+      tmux capture-pane -p -t "$agent_pane" -S -80 > "$fork_dir/.rtide/fork-launch-agent.log" 2>&1 || true
+      fork_launch_notice "$fork_window" "RTIDE fork '$label' failed: agent prompt · $status_file"
+      echo "fork: new prompt pane did not become ready (status: $status_file)" >&2
+      return 1
+    fi
     tmux send-keys -t "$agent_pane" -l "$initial_prompt"
     tmux send-keys -t "$agent_pane" Enter
   fi
   tmux select-window -t "$fork_window"
   tmux select-pane -t "$agent_pane"
+  write_fork_launch_status "$status_file" ready complete 1 1 1 "Fork runtime is ready"
+  printf 'ready=complete\n' >> "$log_file"
+  fork_launch_notice "$fork_window" "RTIDE fork '$label' is ready"
   echo "fork: resumed $label"
 }
 
@@ -451,8 +504,10 @@ cmd_fork_menu_action() {
 }
 
 dispatch_fork_menu_action() {
-  local action="$1" name="$2" pane="$3" command
-  printf -v command '%q fork-menu-action %q %q %q' "$SCRIPT_PATH" "$action" "$name" "$pane"
+  local action="$1" name="$2" pane="$3" command log
+  log="${TMPDIR:-/tmp}/rtide-fork-dispatch-$(printf '%s' "$pane-$action-$name" | tr -cs 'A-Za-z0-9._-' '-').log"
+  printf -v command '%q fork-menu-action %q %q %q >%q 2>&1; rc=$?; if (( rc )); then msg=$(tail -1 %q); printf -v notice "RTIDE fork action failed: %%s · log: %%s" "$msg" %q; tmux display-message -d 10000 -t %q "$notice"; fi' \
+    "$SCRIPT_PATH" "$action" "$name" "$pane" "$log" "$log" "$log" "$pane"
   # The picker lives inside a popup. Hand the operation to tmux before closing
   # that popup so create/resume cannot be killed with its owning shell.
   tmux run-shell -b "$command"

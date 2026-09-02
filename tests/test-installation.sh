@@ -101,6 +101,15 @@ grep -F 'validate_fork_snapshot "$root"' <<< "$fork_source" >/dev/null \
 snapshot_source=$(sed -n '/^validate_fork_snapshot()/,/^}/p' "$ROOT/bin/rtide")
 grep -F 'runtime dependency is untracked' <<< "$snapshot_source" >/dev/null \
   || fail 'fork snapshot validation does not identify untracked runtime dependencies'
+launch_source=$(sed -n '/^launch_fork_window()/,/^fork_root_from_context()/p' "$ROOT/bin/rtide")
+for diagnostic in 'fork-launch.json' 'fork-launch-nvim.log' 'fork-launch-tweb.log' 'fork-launch-agent.log'; do
+  grep -F "$diagnostic" <<< "$launch_source" >/dev/null \
+    || fail "fork launch diagnostics omit $diagnostic"
+done
+grep -F 'fork_launch_notice' <<< "$launch_source" >/dev/null \
+  || fail 'fork readiness failures are not announced to the user'
+grep -F 'failed readiness' <<< "$launch_source" >/dev/null \
+  || fail 'fork readiness status does not record the failed stage'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null

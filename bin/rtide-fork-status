@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Atomically persist one RTIDE fork launch status update."""
+
+import datetime
+import json
+import os
+import sys
+
+
+def main() -> int:
+    if len(sys.argv) != 8:
+        print("usage: rtide-fork-status PATH STATE STAGE NVIM TWEB AGENT MESSAGE", file=sys.stderr)
+        return 2
+    path, state, stage, nvim, tweb, agent, message = sys.argv[1:]
+    payload = {
+        "state": state,
+        "stage": stage,
+        "readiness": {"nvim": nvim == "1", "tweb": tweb == "1", "agent": agent == "1"},
+        "message": message,
+        "updated": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    temporary = path + ".tmp"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+    os.replace(temporary, path)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
