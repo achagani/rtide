@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Create and update RTIDE implementation-dashboard output artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import html
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+def slugify(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-") or "implementation"
+
+
+def atomic_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def load(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"progress error: cannot read {path}: {error}")
+    if not isinstance(value, dict):
+        raise SystemExit(f"progress error: invalid state: {path}")
+    return value
+
+
+def percent(data: dict[str, object]) -> int:
+    steps = data.get("steps", [])
+    if not steps:
+        return 0
+    weights = {"pending": 0, "active": 0.35, "blocked": 0.35, "complete": 1}
+    return round(sum(weights.get(str(step.get("status")), 0) for step in steps) / len(steps) * 100)
+
+
+def render(data: dict[str, object], output: Path) -> None:
+    state = str(data.get("status", "active"))
+    progress = 100 if state == "complete" else percent(data)
+    step_html = []
+    icons = {"pending": "○", "active": "◌", "blocked": "!", "complete": "✓"}
+    for index, step in enumerate(data.get("steps", []), 1):
+        status = str(step.get("status", "pending"))
+        events = "".join(
+            f'<li><time>{html.escape(str(event.get("time", "")))}</time>{html.escape(str(event.get("message", "")))}</li>'
+            for event in step.get("events", [])[-6:]
+        )
+        detail = f'<p>{html.escape(str(step.get("detail", "")))}</p>' if step.get("detail") else ""
+        step_html.append(
+            f'<article class="step {status}" style="--delay:{index * .07}s">'
+            f'<div class="rail"><span>{icons.get(status, "○")}</span></div><div>'
+            f'<div class="step-head"><h2>{html.escape(str(step.get("title", "Step")))}</h2>'
+            f'<b>{html.escape(status)}</b></div>{detail}<ol>{events}</ol></div></article>'
+        )
+    metrics = "".join(
+        f'<div><strong>{html.escape(str(item.get("value", "")))}</strong><span>{html.escape(str(item.get("label", "")))}</span></div>'
+        for item in data.get("metrics", [])
+    )
+    logs = "".join(
+        f'<li><time>{html.escape(str(item.get("time", "")))}</time>{html.escape(str(item.get("message", "")))}</li>'
+        for item in data.get("log", [])[-12:]
+    )
+    complete = state == "complete"
+    status_label = "Implementation complete" if complete else ("Blocked" if state == "blocked" else "Implementation running")
+    page = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="rtide-output-kind" content="implementation-dashboard"><title>{html.escape(str(data.get("title", "Implementation Dashboard")))}</title><style>
+:root{{color-scheme:dark;--bg:#090e11;--ink:#edf5f0;--muted:#8d9c94;--line:#26352e;--green:#6ee7a2;--blue:#7cbcff;--amber:#f1c46c;--red:#ff7b72}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 82% 8%,#153025 0,transparent 30%),var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}}main{{max-width:1100px;margin:auto;padding:clamp(25px,5vw,64px)}}header{{display:grid;grid-template-columns:1fr auto;gap:30px;padding-bottom:28px;border-bottom:1px solid var(--line)}}.eyebrow{{font:800 11px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--green)}}h1{{font-size:clamp(34px,6vw,68px);line-height:.98;letter-spacing:-.05em;margin:12px 0}}header p,.step p{{color:var(--muted);margin:0}}.status{{align-self:end;border-left:3px solid var(--green);padding:5px 0 5px 17px}}.status strong{{display:block;color:var(--green);font-size:18px}}.progress{{height:7px;background:#17221d;margin:30px 0 38px;overflow:hidden}}.progress i{{display:block;width:{progress}%;height:100%;background:linear-gradient(90deg,var(--green),var(--blue),var(--green));background-size:200% 100%;animation:flow 2.4s linear infinite;transition:width .55s ease}}.layout{{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(260px,.55fr);gap:44px}}.step{{display:grid;grid-template-columns:34px 1fr;border-top:1px solid var(--line);padding:18px 0;animation:enter .45s ease both;animation-delay:var(--delay)}}.rail span{{display:grid;place-items:center;width:22px;height:22px;border:1px solid #405047;border-radius:50%;color:var(--muted);font:800 11px ui-monospace,monospace}}.complete .rail span{{border-color:var(--green);background:var(--green);color:#07120c}}.active .rail span{{border-color:var(--blue);color:var(--blue);animation:pulse 1.7s infinite}}.blocked .rail span{{border-color:var(--red);color:var(--red)}}.step-head{{display:flex;align-items:center;justify-content:space-between;gap:15px}}h2{{font-size:17px;margin:0}}.step-head b{{color:var(--muted);font:700 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.09em}}.active h2{{color:var(--blue)}}.blocked h2{{color:var(--red)}}ol,.activity{{list-style:none;padding:0;margin:10px 0 0}}li{{color:#c0cdc6;font-size:13px;padding:4px 0}}time{{display:inline-block;width:78px;color:var(--blue);font:11px ui-monospace,monospace}}aside{{border-left:1px solid var(--line);padding-left:28px}}aside h3{{font:800 11px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--green);margin:0 0 14px}}.metrics{{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}}.metrics div{{padding:14px 10px 14px 0;border-bottom:1px solid var(--line)}}.metrics strong,.metrics span{{display:block}}.metrics strong{{font-size:21px;color:var(--green)}}.metrics span{{font-size:11px;color:var(--muted)}}.summary{{margin:0 0 24px;color:#c8d4cd}}@keyframes flow{{to{{background-position:-200% 0}}}}@keyframes pulse{{50%{{box-shadow:0 0 0 7px #7cbcff00;background:#7cbcff22}}}}@keyframes enter{{from{{opacity:0;transform:translateY(7px)}}to{{opacity:1;transform:none}}}}@media(max-width:760px){{header,.layout{{grid-template-columns:1fr}}aside{{border:0;padding:0}}.status{{justify-self:start}}}}@media(prefers-reduced-motion:reduce){{*{{animation:none!important;transition:none!important}}}}</style></head><body><main><header><div><div class="eyebrow">RTIDE · implementation dashboard</div><h1>{html.escape(str(data.get("title", "Implementation Dashboard")))}</h1><p>{html.escape(str(data.get("objective", "")))}</p></div><div class="status"><strong>{status_label}</strong>{progress}% · updated {html.escape(str(data.get("updated", "")))}</div></header><div class="progress"><i></i></div><div class="layout"><section>{''.join(step_html)}</section><aside><h3>Outcome</h3><p class="summary">{html.escape(str(data.get("summary", "Work is in progress.")))}</p><h3>Metrics</h3><div class="metrics">{metrics or '<div><strong>—</strong><span>awaiting results</span></div>'}</div><h3 style="margin-top:26px">Live activity</h3><ul class="activity">{logs}</ul></aside></div></main></body></html>'''
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(page, encoding="utf-8")
+
+
+def now() -> str:
+    return dt.datetime.now().strftime("%H:%M:%S")
+
+
+def paths(workspace: Path, dashboard: str) -> tuple[Path, Path]:
+    slug = slugify(dashboard)
+    return workspace / ".rtide" / "progress" / f"{slug}.json", workspace / ".tweb" / f"implementation-{slug}.html"
+
+
+def show(output: Path, no_render: bool) -> None:
+    if not no_render:
+        subprocess.run(["tweb-render", str(output)], check=False)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="rtide-progress")
+    parser.add_argument("--workspace", default=".")
+    parser.add_argument("--no-render", action="store_true")
+    sub = parser.add_subparsers(dest="command", required=True)
+    init = sub.add_parser("init"); init.add_argument("title"); init.add_argument("--objective", default=""); init.add_argument("--steps", nargs="+", required=True)
+    event = sub.add_parser("event"); event.add_argument("dashboard"); event.add_argument("step"); event.add_argument("message"); event.add_argument("--status", choices=("pending", "active", "blocked", "complete"))
+    finish = sub.add_parser("finish"); finish.add_argument("dashboard"); finish.add_argument("--summary", required=True); finish.add_argument("--metric", action="append", default=[]); finish.add_argument("--blocked", action="store_true")
+    args = parser.parse_args()
+    workspace = Path(args.workspace).resolve()
+    state_path, output = paths(workspace, args.title if args.command == "init" else args.dashboard)
+    if args.command == "init":
+        data = {"schema": 1, "kind": "implementation-dashboard", "title": args.title, "objective": args.objective, "status": "active", "created": now(), "updated": now(), "summary": "Implementation is in progress.", "steps": [{"id": slugify(title), "title": title, "status": "pending", "detail": "", "events": []} for title in args.steps], "metrics": [], "log": [{"time": now(), "message": "Dashboard initialized"}]}
+    else:
+        data = load(state_path)
+        if args.command == "event":
+            matches = [step for step in data["steps"] if args.step in {step["id"], step["title"]}]
+            if len(matches) != 1:
+                raise SystemExit(f"progress error: step not found or ambiguous: {args.step}")
+            step = matches[0]
+            if args.status:
+                step["status"] = args.status
+            step["events"].append({"time": now(), "message": args.message})
+            data["log"].append({"time": now(), "message": f"{step['title']}: {args.message}"})
+        else:
+            data["status"] = "blocked" if args.blocked else "complete"
+            data["summary"] = args.summary
+            if not args.blocked:
+                for step in data["steps"]:
+                    if step["status"] != "blocked": step["status"] = "complete"
+            metrics = []
+            for value in args.metric:
+                label, separator, number = value.partition("=")
+                if not separator: raise SystemExit("progress error: metric must be label=value")
+                metrics.append({"label": label, "value": number})
+            data["metrics"] = metrics
+            data["log"].append({"time": now(), "message": "Dashboard finalized"})
+        data["updated"] = now()
+    atomic_json(state_path, data)
+    render(data, output)
+    show(output, args.no_render)
+    print(output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

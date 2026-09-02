@@ -180,6 +180,19 @@ class AgentStatusTests(unittest.TestCase):
             AGENT.refresh_artifact_titles(entries)
             self.assertEqual(entries[0]["title"], "Big Meadows — Deep Trip Briefing")
 
+    def test_implementation_dashboard_has_native_output_kind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            page = os.path.join(tmp, "progress.html")
+            with open(page, "w") as handle:
+                handle.write('<meta name="rtide-output-kind" content="implementation-dashboard"><title>Build progress</title>')
+            self.assertEqual(AGENT.artifact_kind("file://" + page), "implementation dashboard")
+            entries = [{"kind": "implementation dashboard", "title": "Build progress", "request": "Implement", "url": "file://" + page, "elapsed": 2, "created": "now"}]
+            history = AGENT.build_history_html(entries, "demo", "implementation")
+            viewer = AGENT.build_viewer_html(entries)
+            self.assertIn('data-kind="implementation"', history)
+            self.assertIn("history-implementations.html", history)
+            self.assertIn('"kind": "implementation"', viewer)
+
     def test_fallback_is_a_standalone_designed_result(self):
         page = AGENT.build_result_html(
             "Compare the options", "# Recommendation\n\n- Fast\n- Clear", "demo", 4.2

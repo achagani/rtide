@@ -13,6 +13,12 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 - The RTIDE wrapper supplies a designed standalone fallback for plain responses and
   keeps a separate output-history index. For research, comparisons, plans, reports,
   and other substantive work, create a purpose-built HTML artifact yourself.
+- For implementation tasks with three or more meaningful phases, use the
+  `implementation-dashboard` output type via `rtide-progress`. Initialize it
+  before editing, publish an event whenever a substep starts, completes, or is
+  blocked, and finalize it with the implementation summary, tests, version, and
+  release state. Re-render the same dashboard throughout so progress is visible
+  in real time; never label integration or deployment complete until verified.
 
 ## Visual communication
 - Prefer the clearest visual form for the material: relevant images, maps for

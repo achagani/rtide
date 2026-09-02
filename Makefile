@@ -6,12 +6,14 @@ BASH_SOURCES := install.sh \
 	bin/rtide bin/rtide-mcp bin/rtide-mem bin/rtide-open \
 	bin/rtide-forks \
 	bin/rtide-memory-index \
+	bin/rtide-progress \
 	bin/rtide-provider bin/rtide-tweb-common bin/tweb-render bin/tweb-run \
 	scripts/check-version-bump scripts/install-user scripts/rtide-dev \
 	scripts/rtide-launcher scripts/stage-package
 PYTHON_SOURCES := bin/rtide-agent bin/rtide-dictate scripts/bump-version \
 	bin/rtide-forks bin/rtide-memory-index scripts/package-tool \
-	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py
+	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py \
+	tests/test-progress.py
 
 .PHONY: all check test build dev install stage verify-install bump-patch bump-minor bump-major
 
@@ -29,6 +31,7 @@ test: check
 	python3 -m unittest tests/test-agent-status.py
 	python3 -m unittest tests/test-fork-manager.py
 	python3 -m unittest tests/test-memory-index.py
+	python3 -m unittest tests/test-progress.py
 	./tests/test-installation.sh
 
 build: test

@@ -118,6 +118,20 @@ def artifact_title(target):
         return None
 
 
+def artifact_kind(target):
+    """Classify authored local output metadata."""
+    parsed = urllib.parse.urlparse(target or "")
+    if parsed.scheme != "file":
+        return "custom artifact"
+    try:
+        with open(urllib.parse.unquote(parsed.path), encoding="utf-8") as page:
+            head = page.read(16384)
+    except OSError:
+        return "custom artifact"
+    match = re.search(r'<meta\s+[^>]*name=["\']rtide-output-kind["\'][^>]*content=["\']([^"\']+)', head, re.I)
+    return "implementation dashboard" if match and match.group(1) == "implementation-dashboard" else "custom artifact"
+
+
 def refresh_artifact_titles(entries):
     """Repair legacy custom-history labels from each artifact's own title."""
     for entry in entries:
@@ -762,7 +776,7 @@ HISTORY_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><me
 # Use real pages/links for archive filters so the controls remain functional.
 HISTORY_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Output history — {workspace}</title><style>
 :root{{color-scheme:dark;--bg:#090d14;--line:#263449;--text:#edf3ff;--muted:#8495aa;--cyan:#5eead4;--blue:#6db5ff;--violet:#b69cff}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(140deg,#101b2b 0,#090d14 28rem);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}}main{{max-width:1040px;margin:auto;padding:22px 20px 56px}}header{{display:flex;align-items:end;justify-content:space-between;gap:20px;padding:0 2px 14px;border-bottom:1px solid var(--line);margin-bottom:10px}}.eyebrow{{color:var(--cyan);font-size:.66rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}}h1{{font-size:clamp(1.45rem,3vw,2rem);letter-spacing:-.035em;margin:.12rem 0 0}}.tools{{display:flex;align-items:center;gap:12px}}.counts{{color:var(--muted);font-size:.76rem;white-space:nowrap}}.filters{{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:9px;background:#0b111a}}.filters a{{border-radius:6px;padding:5px 8px;color:var(--muted);font:650 .7rem system-ui;text-decoration:none}}.filters a.active{{background:#1a2738;color:#fff}}.list{{display:grid}}.card{{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:11px;text-decoration:none;color:inherit;border-bottom:1px solid #202c3d;padding:9px 8px;min-height:58px}}.card:hover{{background:#ffffff08}}.icon{{display:grid;place-items:center;width:28px;height:28px;border:1px solid #33445b;border-radius:8px;color:var(--blue);background:#101925;font-size:.72rem}}.artifact .icon{{color:var(--violet);border-color:#57477b;background:#19152a}}.copy{{min-width:0}}h2{{font-size:.92rem;line-height:1.25;margin:0;color:#f7f9ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}p{{color:#93a4b9;margin:3px 0 0;font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}.side{{text-align:right;min-width:122px}}.meta{{color:var(--muted);font-size:.68rem;white-space:nowrap}}.kind{{display:inline-block;margin-top:3px;color:var(--cyan);font-size:.64rem;font-weight:750;letter-spacing:.055em;text-transform:uppercase}}.artifact .kind{{color:var(--violet)}}.empty{{padding:24px 8px;color:var(--muted)}}@media(max-width:700px){{main{{padding:16px 12px 40px}}header{{align-items:start;flex-direction:column}}.tools{{width:100%;justify-content:space-between}}.card{{grid-template-columns:26px minmax(0,1fr);padding:9px 4px}}.side{{grid-column:2;text-align:left;display:flex;gap:8px;align-items:center}}}}
-</style></head><body><main><header><div><div class="eyebrow">RTIDE · output archive</div><h1>Output history</h1></div><div class="tools"><nav class="filters" aria-label="Filter outputs"><a class="{all_active}" href="history.html">All</a><a class="{artifact_active}" href="history-artifacts.html">Artifacts</a><a class="{response_active}" href="history-responses.html">Responses</a></nav><div class="counts">{shown_count} shown · {count} total</div></div></header><div class="list">{cards}</div></main></body></html>"""
+</style></head><body><main><header><div><div class="eyebrow">RTIDE · output archive</div><h1>Output history</h1></div><div class="tools"><nav class="filters" aria-label="Filter outputs"><a class="{all_active}" href="history.html">All</a><a class="{implementation_active}" href="history-implementations.html">Implementations</a><a class="{artifact_active}" href="history-artifacts.html">Artifacts</a><a class="{response_active}" href="history-responses.html">Responses</a></nav><div class="counts">{shown_count} shown · {count} total</div></div></header><div class="list">{cards}</div></main></body></html>"""
 
 
 VIEWER_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RTIDE output viewer</title><style>
@@ -773,8 +787,12 @@ const allItems={items};const frame=document.getElementById('artifact');const dot
 
 
 def build_viewer_html(entries, pdf_endpoint=""):
+    def viewer_kind(entry):
+        if entry.get("kind") == "implementation dashboard":
+            return "implementation"
+        return "artifact" if entry.get("kind") == "custom artifact" else "response"
     items = [{"url": e.get("url", ""), "title": e.get("title", "Output"),
-              "kind": "artifact" if e.get("kind") == "custom artifact" else "response"}
+              "kind": viewer_kind(e)}
              for e in entries if e.get("url")]
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
     page = VIEWER_PAGE.format(items=payload)
@@ -821,14 +839,18 @@ def save_history(path, entries):
 
 def build_history_html(entries, workspace, mode="all"):
     cards = []
-    visible = [entry for entry in entries if mode == "all" or
-               (mode == "artifact") == (entry.get("kind") == "custom artifact")]
+    def category(entry):
+        if entry.get("kind") == "implementation dashboard":
+            return "implementation"
+        return "artifact" if entry.get("kind") == "custom artifact" else "response"
+    visible = [entry for entry in entries if mode == "all" or category(entry) == mode]
     for entry in reversed(visible):
         summary = " ".join(entry.get("request", "").split())[:110]
         kind = entry.get("kind", "result")
         is_artifact = kind == "custom artifact"
-        card_class = "card artifact" if is_artifact else "card"
-        icon = "◆" if is_artifact else "↗"
+        is_implementation = kind == "implementation dashboard"
+        card_class = "card implementation" if is_implementation else ("card artifact" if is_artifact else "card")
+        icon = "◌" if is_implementation else ("◆" if is_artifact else "↗")
         target = entry.get("url", "")
         parsed = urllib.parse.urlparse(target)
         if parsed.scheme == "file" and "/.tweb/" in parsed.path:
@@ -837,7 +859,7 @@ def build_history_html(entries, workspace, mode="all"):
         else:
             href = target
         cards.append(
-            f'<a class="{card_class}" data-kind="{"artifact" if is_artifact else "response"}" href="{H.escape(href, quote=True)}">'
+            f'<a class="{card_class}" data-kind="{category(entry)}" href="{H.escape(href, quote=True)}">'
             f'<span class="icon" aria-hidden="true">{icon}</span><div class="copy">'
             f'<h2>{H.escape(entry.get("title", "Result"))}</h2>'
             f'<p>{H.escape(summary)}</p></div><div class="side">'
@@ -855,11 +877,13 @@ def build_history_html(entries, workspace, mode="all"):
         all_active="active" if mode == "all" else "",
         artifact_active="active" if mode == "artifact" else "",
         response_active="active" if mode == "response" else "",
+        implementation_active="active" if mode == "implementation" else "",
     )
 
 
 def write_history_pages(tweb_dir, entries, workspace):
     for name, mode in (("history.html", "all"),
+                       ("history-implementations.html", "implementation"),
                        ("history-artifacts.html", "artifact"),
                        ("history-responses.html", "response"),
                        ("agent.html", "all")):
@@ -1026,7 +1050,7 @@ def main():
             "url": target,
             "elapsed": dt,
             "created": datetime.datetime.now().strftime("%b %d, %Y · %H:%M"),
-            "kind": "custom artifact" if custom else "designed result",
+            "kind": artifact_kind(target) if custom else "designed result",
         }
         history.append(entry)
         save_history(history_data_path, history)

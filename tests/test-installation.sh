@@ -30,6 +30,7 @@ BASE="$TEST_TMP/build/rtide-$(tr -d '[:space:]' < "$ROOT/VERSION")"
 [[ -f "$BASE/share/assets/rtide-mark.png" ]] || fail 'release payload omitted the RTIDE logo'
 [[ -x "$BASE/bin/rtide-forks" && -x "$BASE/bin/rtide-memory-index" ]] \
   || fail 'release payload omitted fork manager helpers'
+[[ -x "$BASE/bin/rtide-progress" ]] || fail 'release payload omitted implementation dashboard helper'
 grep -F 'src="assets/rtide-mark.png"' "$BASE/share/welcome.html" >/dev/null \
   || fail 'welcome screen does not use the packaged logo'
 
