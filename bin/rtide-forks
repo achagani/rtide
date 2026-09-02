@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Persistent RTIDE fork discovery and safety checks."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], check=check, capture_output=True, text=True
+    )
+
+
+def primary_root(root: Path) -> Path:
+    output = git(root, "worktree", "list", "--porcelain").stdout.splitlines()
+    for line in output:
+        if line.startswith("worktree "):
+            return Path(line[9:]).resolve()
+    raise RuntimeError("repository has no primary worktree")
+
+
+def parse_origin(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    origin = path / ".rtide" / "fork-origin"
+    if origin.is_file():
+        for line in origin.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key] = value
+    return values
+
+
+def first_request(path: Path) -> str:
+    history = path / ".rtide" / "output-history.json"
+    try:
+        entries = json.loads(history.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    for entry in entries:
+        request = str(entry.get("request", "")).strip()
+        if request:
+            return request
+    return ""
+
+
+def worktrees(root: Path) -> list[dict[str, object]]:
+    primary = primary_root(root)
+    records: list[dict[str, object]] = []
+    current: dict[str, object] = {}
+    for line in git(root, "worktree", "list", "--porcelain").stdout.splitlines() + [""]:
+        if not line:
+            if current:
+                path = Path(str(current["path"])).resolve()
+                if path != primary:
+                    branch_ref = str(current.get("branch", ""))
+                    branch = branch_ref.removeprefix("refs/heads/")
+                    status = git(path, "status", "--porcelain", check=False).stdout
+                    dirty = bool(status.strip())
+                    ahead = git(root, "rev-list", "--count", f"main..{branch}", check=False)
+                    behind = git(root, "rev-list", "--count", f"{branch}..main", check=False)
+                    merged = git(root, "merge-base", "--is-ancestor", branch, "main", check=False)
+                    origin = parse_origin(path)
+                    records.append(
+                        {
+                            "name": path.name,
+                            "path": str(path),
+                            "branch": branch,
+                            "head": current.get("head", ""),
+                            "dirty": dirty,
+                            "locked": bool(current.get("locked")),
+                            "prunable": bool(current.get("prunable")),
+                            "ahead": int(ahead.stdout.strip() or 0) if ahead.returncode == 0 else None,
+                            "behind": int(behind.stdout.strip() or 0) if behind.returncode == 0 else None,
+                            "merged": merged.returncode == 0,
+                            "created": origin.get("created", ""),
+                            "source": origin.get("source", ""),
+                            "request": first_request(path),
+                            "session_file": str(path / ".rtide" / "agent-session"),
+                        }
+                    )
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            current["path"] = value
+        elif key == "HEAD":
+            current["head"] = value
+        elif key == "branch":
+            current["branch"] = value
+        elif key in {"locked", "prunable", "bare", "detached"}:
+            current[key] = value or True
+    return records
+
+
+def resolve(items: list[dict[str, object]], selector: str) -> dict[str, object]:
+    selector_path = os.path.realpath(selector)
+    matches = [
+        item for item in items
+        if selector in {item["name"], item["branch"], item["path"]}
+        or selector_path == item["path"]
+    ]
+    if not matches:
+        raise ValueError(f"fork not found: {selector}")
+    if len(matches) > 1:
+        raise ValueError(f"fork selector is ambiguous: {selector}")
+    return matches[0]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="rtide-forks")
+    parser.add_argument("--root", default=".")
+    sub = parser.add_subparsers(dest="command", required=True)
+    list_parser = sub.add_parser("list")
+    list_parser.add_argument("--json", action="store_true")
+    status_parser = sub.add_parser("status")
+    status_parser.add_argument("selector")
+    status_parser.add_argument("--json", action="store_true")
+    finish_parser = sub.add_parser("check-finish")
+    finish_parser.add_argument("selector")
+    args = parser.parse_args()
+
+    root = Path(args.root).resolve()
+    try:
+        items = worktrees(root)
+        if args.command == "list":
+            if args.json:
+                print(json.dumps(items, indent=2))
+            else:
+                for item in items:
+                    state = "modified" if item["dirty"] else "clean"
+                    print(f"{item['name']}\t{item['branch']}\t{state}\t{item['ahead']} ahead\t{item['path']}")
+            return 0
+        item = resolve(items, args.selector)
+        if args.command == "status":
+            if args.json:
+                print(json.dumps(item, indent=2))
+            else:
+                for key, value in item.items():
+                    print(f"{key}: {value}")
+            return 0
+        reasons = []
+        if item["dirty"]:
+            reasons.append("worktree has modified or untracked files")
+        if item["locked"]:
+            reasons.append("worktree is locked")
+        if item["prunable"]:
+            reasons.append("worktree is prunable or missing")
+        if not item["merged"]:
+            reasons.append("branch is not merged into main")
+        if reasons:
+            print("unsafe to finish:", file=sys.stderr)
+            for reason in reasons:
+                print(f"- {reason}", file=sys.stderr)
+            return 2
+        print(f"safe to finish: {item['name']}")
+        return 0
+    except (RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"fork error: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

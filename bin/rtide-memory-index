@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Additive RTIDE Memory v2 index; Markdown remains the compatibility source."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+from pathlib import Path
+import re
+import shutil
+import sys
+import tempfile
+
+SCHEMA = 2
+
+
+def normalize(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def frontmatter(text: str) -> dict[str, str]:
+    if not text.startswith("---\n"):
+        return {}
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        return {}
+    values: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            values[key.strip()] = value.strip()
+    return values
+
+
+def body(text: str) -> str:
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end >= 0:
+            return text[end + 5 :].strip()
+    return text.strip()
+
+
+def entry_for(path: Path, scope: str) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    meta = frontmatter(text)
+    content = body(text)
+    content_hash = hashlib.sha256(normalize(content).encode()).hexdigest()
+    identity = f"{scope}\0{path.name}\0{content_hash}".encode()
+    return {
+        "id": "mem_" + hashlib.sha256(identity).hexdigest()[:24],
+        "slug": path.stem,
+        "scope": scope,
+        "canonical_key": meta.get("canonical_key", path.stem.replace("-", ".")),
+        "content_hash": content_hash,
+        "source": str(path.resolve()),
+        "created": meta.get("created", ""),
+        "updated": meta.get("updated", ""),
+        "status": "active",
+        "review": "pending" if scope == "fork" else "reviewed",
+        "promoted_to": None,
+    }
+
+
+def build(memory_dir: Path, scope: str) -> dict[str, object]:
+    entries = [
+        entry_for(path, scope)
+        for path in sorted(memory_dir.glob("*.md"))
+        if path.name != "MEMORY.md"
+    ]
+    hashes: dict[str, list[str]] = {}
+    for entry in entries:
+        hashes.setdefault(str(entry["content_hash"]), []).append(str(entry["id"]))
+    return {
+        "schema": SCHEMA,
+        "scope": scope,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "entries": entries,
+        "exact_duplicates": {key: value for key, value in hashes.items() if len(value) > 1},
+    }
+
+
+def migrate(memory_dir: Path, scope: str) -> Path:
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    destination = memory_dir / ".index-v2"
+    data = build(memory_dir, scope)
+    if destination.is_dir():
+        current = destination / "index.json"
+        if current.is_file():
+            try:
+                previous = json.loads(current.read_text(encoding="utf-8"))
+                previous.pop("generated_at", None)
+                comparison = dict(data); comparison.pop("generated_at", None)
+                if previous == comparison:
+                    return destination
+            except (OSError, ValueError):
+                pass
+    temporary = Path(tempfile.mkdtemp(prefix=".index-v2.tmp-", dir=memory_dir))
+    try:
+        (temporary / "index.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        (temporary / "memory-schema.json").write_text(json.dumps({
+            "version": SCHEMA,
+            "compatibility_source": "../MEMORY.md",
+            "migrated_at": data["generated_at"],
+        }, indent=2) + "\n", encoding="utf-8")
+        if destination.exists():
+            backup = memory_dir / ".index-v2.previous"
+            if backup.exists():
+                shutil.rmtree(backup)
+            destination.replace(backup)
+        temporary.replace(destination)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    return destination
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="rtide-memory-index")
+    parser.add_argument("memory_dir")
+    parser.add_argument("--scope", choices=("global", "project", "fork"), required=True)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    try:
+        destination = migrate(Path(args.memory_dir).resolve(), args.scope)
+        data = json.loads((destination / "index.json").read_text(encoding="utf-8"))
+        if args.json:
+            print(json.dumps(data, indent=2))
+        else:
+            pending = sum(entry["review"] == "pending" for entry in data["entries"])
+            print(f"memory v2: {len(data['entries'])} entries, {pending} pending review")
+        return 0
+    except (OSError, ValueError) as error:
+        print(f"memory migration error: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -4,11 +4,14 @@ VERSION := $(shell tr -d '[:space:]' < VERSION)
 PAYLOAD := $(CURDIR)/build/rtide-$(VERSION)
 BASH_SOURCES := install.sh \
 	bin/rtide bin/rtide-mcp bin/rtide-mem bin/rtide-open \
+	bin/rtide-forks \
+	bin/rtide-memory-index \
 	bin/rtide-provider bin/rtide-tweb-common bin/tweb-render bin/tweb-run \
 	scripts/check-version-bump scripts/install-user scripts/rtide-dev \
 	scripts/rtide-launcher scripts/stage-package
 PYTHON_SOURCES := bin/rtide-agent bin/rtide-dictate scripts/bump-version \
-	scripts/package-tool tests/test-agent-status.py
+	bin/rtide-forks bin/rtide-memory-index scripts/package-tool \
+	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py
 
 .PHONY: all check test build dev install stage verify-install bump-patch bump-minor bump-major
 
@@ -24,6 +27,8 @@ test: check
 	./tests/test-output-routing.sh
 	./tests/test-fork.sh
 	python3 -m unittest tests/test-agent-status.py
+	python3 -m unittest tests/test-fork-manager.py
+	python3 -m unittest tests/test-memory-index.py
 	./tests/test-installation.sh
 
 build: test

@@ -147,7 +147,7 @@ def managed_tweb_pane():
     return matches[0] if len(matches) == 1 else None
 
 
-def fork_conversation(prompt):
+def fork_command(arguments):
     """Create an isolated fork window and submit prompt after it is ready."""
     pane = os.environ.get("TMUX_PANE", "")
     if not pane:
@@ -161,8 +161,17 @@ def fork_conversation(prompt):
     if location.returncode != 0 or len(fields) != 2:
         return False, "fork: could not resolve the current workspace window"
     session, window = fields
+    words = arguments.split(maxsplit=1)
+    action = words[0] if words else ""
+    if action in {"list", "resume", "stop", "status", "finish", "memories"}:
+        command = [RTIDE_BIN, "fork", action]
+        if len(words) == 2:
+            command.append(words[1])
+    else:
+        prompt = words[1] if action == "new" and len(words) == 2 else arguments
+        command = [RTIDE_BIN, "fork", session, window, "", prompt]
     result = subprocess.run(
-        [RTIDE_BIN, "fork", session, window, "", prompt],
+        command,
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -931,19 +940,16 @@ def main():
         if not req:
             continue
         if req == "/help":
-            status("/fork PROMPT · plain text queues while working · /steer TEXT · /interrupt · /resend · /queue")
+            status("/fork · /fork new PROMPT · /fork resume NAME · /fork stop NAME · /fork status NAME · /fork finish NAME")
             continue
         if req == "/fork":
-            status("fork: add a prompt after /fork")
+            subprocess.run([RTIDE_BIN, "fork-menu", os.environ.get("TMUX_PANE", "")])
             continue
         if req.startswith("/fork "):
             fork_prompt = req[6:].strip()
-            if not fork_prompt:
-                status("fork: add a prompt after /fork")
-                continue
             clear()
             status(f"{MAGENTA}◆{RESET} creating isolated conversation fork…")
-            ok, message = fork_conversation(fork_prompt)
+            ok, message = fork_command(fork_prompt)
             if not ok:
                 clear()
                 error_status(message)

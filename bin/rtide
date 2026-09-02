@@ -37,6 +37,7 @@ SESSION_PREFIX="${RTIDE_SESSION_PREFIX:-rtide-}"
 printf -v RTIDE_CMD '%q' "$SCRIPT_PATH"
 printf -v RTIDE_AGENT_CMD '%q' "$SELF_DIR/rtide-agent"
 printf -v RTIDE_MEM_CMD '%q' "$SELF_DIR/rtide-mem"
+printf -v RTIDE_FORKS_CMD '%q' "$SELF_DIR/rtide-forks"
 
 cmd_version() {
   local verbose="${1:-}" version revision digest
@@ -230,6 +231,143 @@ cmd_new() {
   exec "$0" "$ndir"
 }
 
+fork_running_window() {
+  local sess="$1" workspace="$2"
+  tmux list-windows -t "$sess" -F '#{window_id} #{@rtide-workspace}' 2>/dev/null \
+    | awk -v d="$(realpath -m "$workspace")" '$2==d{print $1; exit}'
+}
+
+launch_fork_window() {
+  local sess="$1" fork_dir="$2" label="$3" initial_prompt="${4:-}"
+  local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready marker
+  local running
+  running=$(fork_running_window "$sess" "$fork_dir")
+  if [[ -n "$running" ]]; then
+    tmux select-window -t "$running"
+    echo "fork: switched to $label"
+    return 0
+  fi
+  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  [[ -f "$fork_dir/.rtide/agent" ]] && source "$fork_dir/.rtide/agent"
+  harness="${harness:-${agent:-}}"; agent_lines="${agent_lines:-3}"
+  tweb_pct="${tweb_pct:-60}"; shell="${shell:-bash}"
+  fork_window=$(tmux new-window -d -P -F '#{window_id}' -t "$sess:" -n "$label" -c "$fork_dir")
+  tmux set-option -w -t "$fork_window" @rtide-workspace "$fork_dir"
+  nvim_pane=$(tmux list-panes -t "$fork_window" -F '#{pane_id}' | head -1)
+  tmux set-option -p -t "$nvim_pane" @rtide-role nvim
+  tmux select-pane -t "$nvim_pane" -T nvim
+  tmux send-keys -t "$nvim_pane" "SHELL=$shell nvim --listen '$fork_dir/.rtide/nvim.sock' '$fork_dir'" Enter
+  agent_pane=$(tmux split-window -d -v -P -F '#{pane_id}' -t "$nvim_pane" -l "$agent_lines" -c "$fork_dir")
+  tmux set-option -p -t "$agent_pane" @rtide-role agent
+  tmux select-pane -t "$agent_pane" -T agent
+  tweb_pane=$(tmux split-window -d -h -P -F '#{pane_id}' -t "$nvim_pane" -p "$tweb_pct" -c "$fork_dir")
+  tmux set-option -p -t "$tweb_pane" @rtide-role tweb
+  tmux select-pane -t "$tweb_pane" -T tweb
+  printf '%s\n' "$tweb_pane" > "$fork_dir/.rtide/tweb-pane"
+  marker=$(find "$HOME/.cache/rtide" -type f -name last-render -print 2>/dev/null \
+    | xargs -r grep -l "file://$fork_dir/" 2>/dev/null | head -1)
+  if [[ -n "$marker" ]]; then
+    read -r first_page < "$marker"
+  elif [[ -f "$fork_dir/.tweb/history.html" ]]; then
+    first_page="file://$fork_dir/.tweb/history.html"
+  else
+    first_page="file://$fork_dir/.tweb/welcome.html"
+  fi
+  tmux send-keys -t "$tweb_pane" "tweb open '$first_page'" Enter
+  tmux send-keys -t "$agent_pane" "$RTIDE_AGENT_CMD $harness $provider $model $fork_dir" Enter
+  width=$(tmux display-message -p -t "$fork_window" '#{window_width}')
+  tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
+  tmux resize-pane -t "$agent_pane" -y "$agent_lines"
+  tmux resize-pane -t "$tweb_pane" -x "$tweb_w"
+  tmux set-option -w -t "$fork_window" window-size latest 2>/dev/null || true
+  tmux set-hook -w -t "$fork_window" after-resize-window \
+    "run-shell '$RTIDE_CMD refresh-window $fork_window >/dev/null 2>&1'" 2>/dev/null || true
+  tmux select-window -t "$fork_window"
+  tmux select-pane -t "$agent_pane"
+  if [[ -n "$initial_prompt" ]]; then
+    ready=0
+    for _ in $(seq 1 150); do
+      if tmux capture-pane -p -t "$agent_pane" -S -6 2>/dev/null | grep -q '╰─❯'; then ready=1; break; fi
+      sleep 0.1
+    done
+    (( ready )) || { echo "fork: new prompt pane did not become ready" >&2; return 1; }
+    tmux send-keys -t "$agent_pane" -l "$initial_prompt"
+    tmux send-keys -t "$agent_pane" Enter
+  fi
+  echo "fork: resumed $label"
+}
+
+fork_root_from_context() {
+  local pane="${1:-${TMUX_PANE:-}}" workspace
+  workspace=$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null || pwd)
+  git -C "$workspace" rev-parse --show-toplevel 2>/dev/null
+}
+
+cmd_fork_manager() {
+  local action="${2:-list}" selector="${3:-}" sess root item path window
+  sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+  root=$(fork_root_from_context "${TMUX_PANE:-}") || { echo "fork: not in a Git repository" >&2; return 1; }
+  case "$action" in
+    list|status)
+      [[ "$action" == list ]] && "$SELF_DIR/rtide-forks" --root "$root" list \
+        || "$SELF_DIR/rtide-forks" --root "$root" status "${selector:?usage: rtide fork status <name>}"
+      ;;
+    resume)
+      item=$("$SELF_DIR/rtide-forks" --root "$root" status "${selector:?usage: rtide fork resume <name>}" --json) || return
+      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
+      [[ -d "$path/.rtide/memory" ]] && "$SELF_DIR/rtide-memory-index" "$path/.rtide/memory" --scope fork >/dev/null
+      launch_fork_window "$sess" "$path" "$(basename "$path")"
+      ;;
+    stop)
+      item=$("$SELF_DIR/rtide-forks" --root "$root" status "${selector:?usage: rtide fork stop <name>}" --json) || return
+      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
+      window=$(fork_running_window "$sess" "$path")
+      [[ -n "$window" ]] || { echo "fork: already stopped: $selector"; return 0; }
+      "$SELF_DIR/rtide-mem" sweep "$sess" 2>/dev/null || true
+      tmux kill-window -t "$window"
+      echo "fork: stopped $selector; worktree preserved"
+      ;;
+    finish)
+      "$SELF_DIR/rtide-forks" --root "$root" check-finish "${selector:?usage: rtide fork finish <name>}" || return
+      echo "fork: finish is safe; removal requires confirmation in the Fork Manager"
+      ;;
+    memories)
+      item=$("$SELF_DIR/rtide-forks" --root "$root" status "${selector:?usage: rtide fork memories <name>}" --json) || return
+      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
+      mkdir -p "$path/.rtide/memory"
+      "$SELF_DIR/rtide-memory-index" "$path/.rtide/memory" --scope fork
+      echo "fork: memory review data is in $path/.rtide/memory/.index-v2/index.json"
+      ;;
+    *) echo "usage: rtide fork list|resume|stop|status|finish [name]" >&2; return 2 ;;
+  esac
+}
+
+cmd_fork_menu() {
+  local pane="${2:-${TMUX_PANE:-}}" sess root selected name branch state ahead path action quoted
+  [[ -n "$pane" ]] || return 1
+  sess=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
+  root=$(fork_root_from_context "$pane") || { echo "fork: not in a Git repository" >&2; return 1; }
+  command -v fzf >/dev/null 2>&1 || { echo "fork: fzf is required for the visual manager" >&2; return 1; }
+  selected=$("$SELF_DIR/rtide-forks" --root "$root" list \
+    | fzf --ansi --layout=reverse --border=rounded --height=80% \
+      --header=$'Fork Manager\nEnter = actions   type to filter   Esc = cancel' \
+      --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,2,3,4 \
+      --preview='printf "Name: %s\nBranch: %s\nState: %s\nCommits: %s\nPath: %s\n" {1} {2} {3} {4} {5}' \
+      --preview-window=right:45%:wrap) || return 0
+  IFS=$'\t' read -r name branch state ahead path <<< "$selected"
+  action=$(printf '%s\n' \
+    'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Finish fork' \
+    | fzf --layout=reverse --border=rounded --height=60% --header="$name · $state · $ahead" \
+      --prompt='action ❯ ') || return 0
+  case "$action" in
+    'Resume or switch') "$0" fork resume "$name" ;;
+    'View status') "$0" fork status "$name" | less -R ;;
+    'Stop runtime') "$0" fork stop "$name" ;;
+    'Review memories') "$0" fork memories "$name" ;;
+    'Finish fork') "$0" fork finish "$name" ;;
+  esac
+}
+
 cmd_fork() {
   local sess="${2:-}" source_window="${3:-}" requested_name="${4:-}" initial_prompt="${5:-}" source_target nvim source root primary parent base number name branch fork_dir patch_file untracked
   local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready
@@ -336,57 +474,7 @@ PY
   printf 'fork: %s\nworktree: %s\nbranch: %s\n' "$name" "$fork_dir" "$branch"
   [[ "${RTIDE_FORK_NO_LAUNCH:-0}" == 1 ]] && return 0
 
-  [[ -f "$CONFIG" ]] && source "$CONFIG"
-  [[ -f "$fork_dir/.rtide/agent" ]] && source "$fork_dir/.rtide/agent"
-  harness="${harness:-${agent:-}}"; agent_lines="${agent_lines:-3}"
-  tweb_pct="${tweb_pct:-60}"; shell="${shell:-bash}"
-  fork_window=$(tmux new-window -d -P -F '#{window_id}' -t "$sess:" -n "fork-$number" -c "$fork_dir")
-  tmux set-option -w -t "$fork_window" @rtide-workspace "$fork_dir"
-  nvim_pane=$(tmux list-panes -t "$fork_window" -F '#{pane_id}' | head -1)
-  tmux set-option -p -t "$nvim_pane" @rtide-role nvim
-  tmux select-pane -t "$nvim_pane" -T nvim
-  tmux send-keys -t "$nvim_pane" "SHELL=$shell nvim --listen '$fork_dir/.rtide/nvim.sock' '$fork_dir'" Enter
-  agent_pane=$(tmux split-window -d -v -P -F '#{pane_id}' -t "$nvim_pane" -l "$agent_lines" -c "$fork_dir")
-  tmux set-option -p -t "$agent_pane" @rtide-role agent
-  tmux select-pane -t "$agent_pane" -T agent
-  tweb_pane=$(tmux split-window -d -h -P -F '#{pane_id}' -t "$nvim_pane" -p "$tweb_pct" -c "$fork_dir")
-  tmux set-option -p -t "$tweb_pane" @rtide-role tweb
-  tmux select-pane -t "$tweb_pane" -T tweb
-  printf '%s\n' "$tweb_pane" > "$fork_dir/.rtide/tweb-pane"
-  if [[ -f "$fork_dir/.tweb/history.html" ]]; then
-    first_page="$fork_dir/.tweb/history.html"
-  else
-    first_page="$fork_dir/.tweb/welcome.html"
-  fi
-  tmux send-keys -t "$tweb_pane" "tweb open file://$first_page" Enter
-  tmux send-keys -t "$agent_pane" "$RTIDE_AGENT_CMD $harness $provider $model $fork_dir" Enter
-  width=$(tmux display-message -p -t "$fork_window" '#{window_width}')
-  tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
-  tmux resize-pane -t "$agent_pane" -y "$agent_lines"
-  tmux resize-pane -t "$tweb_pane" -x "$tweb_w"
-  tmux set-option -w -t "$fork_window" window-size latest 2>/dev/null || true
-  tmux set-hook -w -t "$fork_window" after-resize-window \
-    "run-shell '$RTIDE_CMD refresh-window $fork_window >/dev/null 2>&1'" 2>/dev/null || true
-  tmux select-window -t "$fork_window"
-  tmux select-pane -t "$agent_pane"
-  if [[ -n "$initial_prompt" ]]; then
-    ready=0
-    for _ in $(seq 1 150); do
-      if tmux capture-pane -p -t "$agent_pane" -S -6 2>/dev/null | grep -q '╰─❯'; then
-        ready=1
-        break
-      fi
-      sleep 0.1
-    done
-    if (( ! ready )); then
-      echo "fork: new prompt pane did not become ready" >&2
-      exit 1
-    fi
-    # send-keys -l passes the prompt as literal text, avoiding shell quoting
-    # failures for apostrophes, command substitutions, or other punctuation.
-    tmux send-keys -t "$agent_pane" -l "$initial_prompt"
-    tmux send-keys -t "$agent_pane" Enter
-  fi
+  launch_fork_window "$sess" "$fork_dir" "fork-$number" "$initial_prompt"
   exit 0
 }
 
@@ -1070,7 +1158,8 @@ cmd_slash_menu() {
   tmux display-menu -t "$pane" -s 'bg=#202334,fg=#cdd6f4' \
     -S 'bg=#181825,fg=#cba6f7' -H 'bg=#45475a,fg=#89dceb,bold' \
     -T "#[align=centre,fg=#94e2d5,bold] Prompt commands" -x 2 -y C \
-    "Fork conversation…" f "send-keys -t '$pane' -l '/fork '" \
+    "Fork Manager…" f "run-shell '$RTIDE_CMD fork-menu $pane'" \
+    "New fork…" n "send-keys -t '$pane' -l '/fork new '" \
     "Steer current turn…" s "send-keys -t '$pane' -l '/steer '" \
     "Interrupt current turn" i "send-keys -t '$pane' -l '/interrupt'; send-keys -t '$pane' Enter" \
     "Queue count" q "send-keys -t '$pane' -l '/queue'; send-keys -t '$pane' Enter" \
@@ -1188,7 +1277,10 @@ case "${1:-}" in
   setup)  cmd_setup; exit 0 ;;
   doctor) cmd_doctor; exit 0 ;;
   new)    cmd_new ;;
-  fork)   cmd_fork "$@"; exit 0 ;;
+  fork)
+    case "${2:-}" in list|resume|stop|status|finish|memories) cmd_fork_manager "$@" ;; *) cmd_fork "$@" ;; esac
+    exit 0 ;;
+  fork-menu) cmd_fork_menu "$@"; exit 0 ;;
   switch) cmd_pick ;;
   zoom)   cmd_zoom "$@" ;;
   ls)     cmd_ls ;;

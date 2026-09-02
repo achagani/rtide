@@ -136,6 +136,7 @@ rtide            → pick a workspace to resume or start one (unknown names only
 rtide <dir>      → launch/attach the workspace for <dir> (prompts for provider/harness/model)
 rtide new        → guided new workspace
 rtide fork [session] [window] [name] → fork into an isolated Git worktree, agent session, and tweb pane in a new tmux window
+rtide fork list|resume|stop|status|memories|finish [name] → manage persistent feature forks
 rtide switch     → same picker as bare rtide (resume / new)
 rtide ls         → list workspaces
 rtide sweep      → capture pending MEM: memories from every live session

@@ -9,6 +9,7 @@ set -euo pipefail
 
 GLOBAL_DIR="$HOME/.rtide/memory"
 PROJECT_DIR="$(pwd)/.rtide/memory"
+MEMORY_INDEX="$(cd "$(dirname "$0")" && pwd)/rtide-memory-index"
 
 mem_dir() { [[ "${1:-project}" == "global" ]] && echo "$GLOBAL_DIR" || echo "$PROJECT_DIR"; }
 
@@ -17,7 +18,15 @@ cmd_init() {
     mkdir -p "$d"
     [[ -f "$d/MEMORY.md" ]] || echo "# Memory index" > "$d/MEMORY.md"
   done
+  "$MEMORY_INDEX" "$GLOBAL_DIR" --scope global >/dev/null
+  "$MEMORY_INDEX" "$PROJECT_DIR" --scope project >/dev/null
   echo "initialized: $GLOBAL_DIR, $PROJECT_DIR"
+}
+
+cmd_migrate() {
+  local scope="${1:-project}" dir
+  dir=$(mem_dir "$scope")
+  "$MEMORY_INDEX" "$dir" --scope "$scope"
 }
 
 cmd_add() {
@@ -304,5 +313,6 @@ case "${1:-}" in
   update) shift; cmd_update "$@" ;;
   sweep)  shift; cmd_sweep "$@" ;;
   mcp)    cmd_mcp ;;
-  *) echo "usage: rtide-mem init|add|list|read|search|update|sweep|mcp"; exit 1 ;;
+  migrate) shift; cmd_migrate "$@" ;;
+  *) echo "usage: rtide-mem init|add|list|read|search|update|sweep|migrate|mcp"; exit 1 ;;
 esac

@@ -113,13 +113,22 @@ class AgentStatusTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"TMUX_PANE": "%9"}):
             with mock.patch.object(AGENT.subprocess, "run",
                                    side_effect=[location, launched]) as run:
-                ok, _ = AGENT.fork_conversation("don't expand $HOME or `pwd`")
+                ok, _ = AGENT.fork_command("don't expand $HOME or `pwd`")
         self.assertTrue(ok)
         self.assertEqual(
             run.call_args_list[1].args[0],
             [AGENT.RTIDE_BIN, "fork", "rtide-demo", "@7", "",
              "don't expand $HOME or `pwd`"],
         )
+
+    def test_fork_lifecycle_command_targets_rtide_directly(self):
+        location = mock.Mock(returncode=0, stdout="rtide-demo\t@7\n")
+        launched = mock.Mock(returncode=0, stdout="fork status\n", stderr="")
+        with mock.patch.dict(os.environ, {"TMUX_PANE": "%9"}):
+            with mock.patch.object(AGENT.subprocess, "run", side_effect=[location, launched]) as run:
+                ok, _ = AGENT.fork_command("status running-icon")
+        self.assertTrue(ok)
+        self.assertEqual(run.call_args_list[1].args[0], [AGENT.RTIDE_BIN, "fork", "status", "running-icon"])
 
     def test_codex_command_event_uses_agent_payload(self):
         event = {

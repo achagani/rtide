@@ -11,7 +11,7 @@ INSTALL_ROOT="${RTIDE_INSTALL_ROOT:-$HOME/.local/lib/rtide}"
 BIN_DIR="${RTIDE_BIN_DIR:-$HOME/.local/bin}"
 VERSIONS_DIR="$INSTALL_ROOT/versions"
 RELEASE="$VERSIONS_DIR/$VERSION"
-COMMANDS=(rtide-provider rtide-mcp rtide-mem rtide-agent rtide-dictate rtide-open tweb-render tweb-run)
+COMMANDS=(rtide-provider rtide-mcp rtide-mem rtide-forks rtide-memory-index rtide-agent rtide-dictate rtide-open tweb-render tweb-run)
 
 python3 "$ROOT/scripts/package-tool" verify "$PAYLOAD" >/dev/null
 mkdir -p "$VERSIONS_DIR" "$BIN_DIR"
@@ -70,6 +70,12 @@ done
 current_tmp="$INSTALL_ROOT/.current.$$"
 ln -s "versions/$VERSION" "$current_tmp"
 mv -Tf "$current_tmp" "$INSTALL_ROOT/current"
+
+# Memory v2 is additive: build an atomic index while leaving all Markdown
+# compatibility sources untouched. A failed index build aborts verification but
+# the previous RTIDE release and original memories remain available for rollback.
+mkdir -p "$HOME/.rtide/memory"
+"$INSTALL_ROOT/current/bin/rtide-memory-index" "$HOME/.rtide/memory" --scope global >/dev/null
 
 # Retain the active release and the two highest-version rollback candidates.
 python3 - "$VERSIONS_DIR" "$VERSION" <<'PY'

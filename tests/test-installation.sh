@@ -28,6 +28,8 @@ python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
 BASE="$TEST_TMP/build/rtide-$(tr -d '[:space:]' < "$ROOT/VERSION")"
 [[ -f "$BASE/share/assets/rtide-mark.png" ]] || fail 'release payload omitted the RTIDE logo'
+[[ -x "$BASE/bin/rtide-forks" && -x "$BASE/bin/rtide-memory-index" ]] \
+  || fail 'release payload omitted fork manager helpers'
 grep -F 'src="assets/rtide-mark.png"' "$BASE/share/welcome.html" >/dev/null \
   || fail 'welcome screen does not use the packaged logo'
 
@@ -44,6 +46,8 @@ make_payload() {
 ln -s "$ROOT/bin/rtide" "$RTIDE_BIN_DIR/rtide"
 FIRST=$(make_payload 0.1.1)
 bash "$ROOT/scripts/install-user" "$FIRST" >/dev/null
+[[ -f "$HOME/.rtide/memory/.index-v2/index.json" ]] \
+  || fail 'installation did not create the additive global memory index'
 [[ ! -L "$RTIDE_BIN_DIR/rtide" && -x "$RTIDE_BIN_DIR/rtide" ]] || fail 'stable launcher was not installed'
 [[ "$(readlink "$RTIDE_INSTALL_ROOT/current")" == versions/0.1.1 ]] || fail 'initial release was not activated'
 [[ "$(rtide --version)" == 'rtide 0.1.1' ]] || fail 'installed version is incorrect'
