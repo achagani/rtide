@@ -31,6 +31,10 @@ grep -F 'DEV BUILD' "$ROOT/bin/rtide" >/dev/null \
   || fail 'development tmux badge is missing'
 grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
   || fail 'development welcome theme is missing'
+grep -F '"Fork Manager…"' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'actions menu does not expose the Fork Manager'
+grep -F 'abort-current-line' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'new fork popup does not bind Escape to cancel'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null

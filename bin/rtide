@@ -372,6 +372,20 @@ cmd_fork_menu() {
   esac
 }
 
+cmd_fork_new_popup() {
+  local sess="${2:-}" window="${3:-}" name
+  [[ -n "$sess" && -n "$window" ]] || { echo "fork: missing workspace context" >&2; return 2; }
+  printf 'Fork name (empty = automatic, Esc = cancel): '
+  # `read -e` uses readline. The popup shell binds Escape to
+  # abort-current-line, causing this read to return non-zero immediately.
+  if ! IFS= read -r -e name; then
+    printf '\n'
+    return 0
+  fi
+  printf '\n'
+  "$0" fork "$sess" "$window" "$name"
+}
+
 cmd_fork() {
   local sess="${2:-}" source_window="${3:-}" requested_name="${4:-}" initial_prompt="${5:-}" source_target nvim source root primary parent base number name branch fork_dir patch_file untracked
   local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready
@@ -1018,7 +1032,8 @@ cmd_menu() {
     "Switch workspace" r "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD switch'" \
     "Change agent…"    m "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 70% '$RTIDE_CMD agent'" \
     "New workspace…"   n "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD new'" \
-    "Fork conversation…" f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 35% 'sh -c \"read -p \\\"Fork name (empty = automatic): \\\" n; $RTIDE_CMD fork ${sess} ${window} \\\"\\\$n\\\"; echo; read -p done\"'" \
+    "New fork…"         f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 35% 'bash --noprofile --norc -c '\''bind '\''\''\"\\e\": abort-current-line\"'\''; $RTIDE_CMD fork-new-popup ${sess} ${window}'\'''" \
+    "Fork Manager…"     F "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 90% -h 80% '$RTIDE_CMD fork-menu #{pane_id}'" \
     "" \
     "- LAYOUT & VIEW"   "" "" \
     "Refresh layout"   R "run-shell '$RTIDE_CMD refresh-window ${window}'" \
@@ -1285,6 +1300,7 @@ case "${1:-}" in
     case "${2:-}" in list|resume|stop|status|finish|memories) cmd_fork_manager "$@" ;; *) cmd_fork "$@" ;; esac
     exit 0 ;;
   fork-menu) cmd_fork_menu "$@"; exit 0 ;;
+  fork-new-popup) cmd_fork_new_popup "$@"; exit 0 ;;
   switch) cmd_pick ;;
   zoom)   cmd_zoom "$@" ;;
   ls)     cmd_ls ;;
