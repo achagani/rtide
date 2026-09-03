@@ -46,35 +46,35 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 ## Rendering
 1. Write a self-contained HTML file to `.tweb/<slug>.html`
    (inline CSS, dark theme, no external deps).
-2. Render: `tweb-render .tweb/<slug>.html`
+2. Render: `rtide render .tweb/<slug>.html`
    — this resolves the tweb pane belonging to the current RTIDE workspace.
 3. Keep automatic output in the workspace pane, including dense content. Use
-   `tweb-render .tweb/<slug>.html`; never pass `--float` during an agent turn.
+   `rtide render .tweb/<slug>.html`; never pass `--float` during an agent turn.
    Floating is an explicit user-controlled viewing action.
-4. Confirm `tweb-render` succeeds. Do not merely say an artifact was produced.
+4. Confirm `rtide render` succeeds. Do not merely say an artifact was produced.
    Never run `tweb split`, `tweb open`, or restart the tweb daemon inside RTIDE;
-   those commands can create a duplicate browser pane. Always use `tweb-render`.
-5. Live updates: edit the HTML and run `tweb-render` again; it keeps the update in
+   those commands can create a duplicate browser pane. Always use `rtide render`.
+5. Live updates: edit the HTML and run `rtide render` again; it keeps the update in
    the current workspace.
 6. Use `~/rtide/share/template.html` as a technical foundation and the design
    playbook for art direction; adapt both to the subject instead of cloning a theme.
 
 ## Tools
-- `tweb-render <file>` / `tweb-render --url <url>` — open a file/URL in tweb
-- `tweb-run <cmd>` — run a program, render its output in tweb (exit code, duration)
+- `rtide render <file>` / `rtide render --url <url>` — open a file/URL in tweb
+- `rtide run -- <cmd>` — run a program, render its output in tweb (exit code, duration)
 - `tweb mcp` tools — navigate, click, fill, eval, snapshot (drive the browser)
 
 ## Files in the editor
-- After creating or editing a file, run `rtide-open <path>` to open it in the
+- After creating or editing a file, run `rtide open <path>` to open it in the
   editor pane (nvim). The agent's terminal stays minimal; the file shows up in
   the editor window instead of the agent's output.
 
 ## Shell
 - `:terminal` in nvim opens the configured hip shell (VS Code-style, on demand)
-- `python script.py | tweb-render -` — pipe any command's output into tweb
+- `python script.py | rtide render -` — pipe any command's output into tweb
 
 ## Memory (auto)
-- At session start, read the memory index: `rtide-mem list` (or read `MEMORY.md`)
+- At session start, read the memory index: `rtide memory list` (or read `MEMORY.md`)
 - When you discover a durable fact (user preference, decision + rationale, tool gotcha, non-obvious behavior), emit it as a one-line status: `MEM: <slug> — <fact>`
-- The sweep auto-persists `MEM:` lines — no tool call needed. (You can also call `rtide-mem add` directly.)
+- The sweep auto-persists `MEM:` lines — no tool call needed. (You can also call `rtide memory add` directly.)
 - Project facts → project scope (default); cross-project facts → `--global`

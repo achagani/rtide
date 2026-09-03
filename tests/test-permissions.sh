@@ -6,12 +6,12 @@ TEST_TMP=$(mktemp -d)
 trap 'find "$TEST_TMP" -depth -type f -delete 2>/dev/null || true; find "$TEST_TMP" -depth -type d -empty -delete 2>/dev/null || true' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-new=$($ROOT/bin/rtide-provider run codex openai test-model prompt '' unrestricted)
+new=$($ROOT/libexec/rtide/provider run codex openai test-model prompt '' unrestricted)
 [[ "$new" == *'--sandbox danger-full-access'* ]] || fail 'new Codex command is not unrestricted'
-resumed=$($ROOT/bin/rtide-provider run codex openai test-model prompt session-1 unrestricted)
+resumed=$($ROOT/libexec/rtide/provider run codex openai test-model prompt session-1 unrestricted)
 [[ "$resumed" == *'exec resume --dangerously-bypass-approvals-and-sandbox session-1'* ]] \
   || fail 'resumed Codex command is not unrestricted'
-default=$($ROOT/bin/rtide-provider run codex openai test-model prompt)
+default=$($ROOT/libexec/rtide/provider run codex openai test-model prompt)
 [[ "$default" == *'--sandbox workspace-write'* ]] || fail 'default Codex command is not workspace sandboxed'
 
 mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/home/.rtide"

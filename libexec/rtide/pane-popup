@@ -1,0 +1,424 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+TMUX_BIN="${TMUX_PROGRAM:-tmux}"
+TMUX_SOCKET="${TMUX_SOCKET:-}"
+TMUX_SOCKET_ARGS=()
+[[ -n "${TMUX_SOCKET}" ]] && TMUX_SOCKET_ARGS=(-S "${TMUX_SOCKET}")
+LOG_FILE="${XDG_RUNTIME_DIR:-/tmp}/tmux-pane-popup-toggle.log"
+
+SCRIPT_PATH="$(realpath "$0")"
+STATE_PREFIX="@floating_pane_popup"
+STATE_ACTIVE="${STATE_PREFIX}_active"
+STATE_SOURCE_PANE="${STATE_PREFIX}_source_pane"
+STATE_SOURCE_WINDOW="${STATE_PREFIX}_source_window"
+STATE_SOURCE_LAYOUT="${STATE_PREFIX}_source_layout"
+STATE_SOURCE_INDEX="${STATE_PREFIX}_source_index"
+STATE_TMP_WINDOW="${STATE_PREFIX}_tmp_window"
+STATE_TMP_SESSION="${STATE_PREFIX}_tmp_session"
+STATE_TMP_TARGET="${STATE_PREFIX}_tmp_target"
+STATE_TMP_SPLIT="${STATE_PREFIX}_tmp_split"
+STATE_TMP_BEFORE="${STATE_PREFIX}_tmp_before"
+STATE_TMP_SIZE="${STATE_PREFIX}_tmp_size"
+STATE_CLIENT="${STATE_PREFIX}_client"
+STATE_POPUP_CLIENT="${STATE_PREFIX}_popup_client"
+STATE_POPUP_LEFT="${STATE_PREFIX}_left"
+STATE_POPUP_TOP="${STATE_PREFIX}_top"
+STATE_POPUP_WIDTH="${STATE_PREFIX}_width"
+STATE_POPUP_HEIGHT="${STATE_PREFIX}_height"
+
+tmux_cmd() {
+  "$TMUX_BIN" "${TMUX_SOCKET_ARGS[@]}" "$@"
+}
+
+state_get() {
+  tmux_cmd show-options -gqv "$1"
+}
+
+state_set() {
+  tmux_cmd set-option -gq "$1" "$2"
+}
+
+state_unset() {
+  tmux_cmd set-option -gu "$1"
+}
+
+logf() {
+  if [ -n "${FLOATING_POPUP_DEBUG:-}" ]; then
+    printf '%s [pane-popup-toggle] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
+  fi
+}
+
+fail() {
+  local msg=$1
+  logf "$msg"
+  if [ -n "${TMUX:-}" ]; then
+    tmux_cmd display-message "$msg" >/dev/null 2>&1 || true
+  else
+    printf '%s\n' "$msg" >&2
+  fi
+}
+
+set_state() {
+  local pane layout window index tmp_window tmp_session split before size target client
+  pane="$1"
+  layout="$2"
+  window="$3"
+  index="$4"
+  tmp_window="$5"
+  tmp_session="$6"
+  target="$7"
+  split="$8"
+  before="$9"
+  size="${10}"
+  client="${11:-}"
+
+  state_set "$STATE_ACTIVE" 1
+  state_set "$STATE_SOURCE_PANE" "$pane"
+  state_set "$STATE_SOURCE_WINDOW" "$window"
+  state_set "$STATE_SOURCE_LAYOUT" "$layout"
+  state_set "$STATE_SOURCE_INDEX" "$index"
+  state_set "$STATE_TMP_WINDOW" "$tmp_window"
+  state_set "$STATE_TMP_SESSION" "$tmp_session"
+  state_set "$STATE_TMP_TARGET" "$target"
+  state_set "$STATE_TMP_SPLIT" "$split"
+  state_set "$STATE_TMP_BEFORE" "$before"
+  state_set "$STATE_TMP_SIZE" "$size"
+  state_set "$STATE_CLIENT" "$client"
+}
+
+clear_state() {
+  state_unset "$STATE_ACTIVE"
+  state_unset "$STATE_SOURCE_PANE"
+  state_unset "$STATE_SOURCE_WINDOW"
+  state_unset "$STATE_SOURCE_LAYOUT"
+  state_unset "$STATE_SOURCE_INDEX"
+  state_unset "$STATE_TMP_WINDOW"
+  state_unset "$STATE_TMP_SESSION"
+  state_unset "$STATE_TMP_TARGET"
+  state_unset "$STATE_TMP_SPLIT"
+  state_unset "$STATE_TMP_BEFORE"
+  state_unset "$STATE_TMP_SIZE"
+  state_unset "$STATE_CLIENT"
+  state_unset "$STATE_POPUP_CLIENT"
+  state_unset "$STATE_POPUP_LEFT"
+  state_unset "$STATE_POPUP_TOP"
+  state_unset "$STATE_POPUP_WIDTH"
+  state_unset "$STATE_POPUP_HEIGHT"
+}
+
+pane_overlap() {
+  local a_start=$1 a_len=$2 b_start=$3 b_len=$4
+  local a_end=$((a_start + a_len))
+  local b_end=$((b_start + b_len))
+  local start=$((a_start > b_start ? a_start : b_start))
+  local end=$((a_end < b_end ? a_end : b_end))
+  if ((end > start)); then
+    printf '%d\n' $((end - start))
+  else
+    printf '0\n'
+  fi
+}
+
+pane_exists_in_window() {
+  local target="$1" window="$2"
+  tmux_cmd list-panes -t "$window" -F '#{pane_id}' | awk -v target="$target" '$0 == target { found = 1 } END { exit !found }'
+}
+
+pane_id_at_index() {
+  local window="$1" index="$2"
+  tmux_cmd list-panes -t "$window" -F '#{pane_id} #{pane_index}' | awk -v idx="$index" '$2 == idx { print $1; exit }'
+}
+
+restore_popup() {
+  local active
+  active="$(state_get "$STATE_ACTIVE" || true)"
+  if [ "$active" = "restoring" ]; then
+    logf "restore_popup: restore already in progress"
+    return 0
+  fi
+  if [ "$active" != "1" ]; then
+    logf "restore_popup: no active state; nothing to do"
+    return 0
+  fi
+
+  state_set "$STATE_ACTIVE" restoring
+
+  local source_pane source_window source_layout source_index tmp_window tmp_session tmp_target split before size client
+  source_pane="$(state_get "$STATE_SOURCE_PANE")"
+  source_window="$(state_get "$STATE_SOURCE_WINDOW")"
+  source_layout="$(state_get "$STATE_SOURCE_LAYOUT")"
+  source_index="$(state_get "$STATE_SOURCE_INDEX")"
+  tmp_window="$(state_get "$STATE_TMP_WINDOW")"
+  tmp_session="$(state_get "$STATE_TMP_SESSION")"
+  tmp_target="$(state_get "$STATE_TMP_TARGET")"
+  split="$(state_get "$STATE_TMP_SPLIT")"
+  before="$(state_get "$STATE_TMP_BEFORE")"
+  size="$(state_get "$STATE_TMP_SIZE")"
+  client="$(state_get "$STATE_CLIENT")"
+
+  if [ -n "$tmp_target" ] && ! pane_exists_in_window "$tmp_target" "$source_window"; then
+    tmp_target=""
+  fi
+  if [ -z "$tmp_target" ]; then
+    tmp_target="$(tmux_cmd list-panes -t "$source_window" -F '#{pane_id}' | awk 'NR==1')"
+  fi
+
+  if tmux_cmd list-panes -t "$source_window" -F '#{pane_id}' | awk -v p="$source_pane" 'BEGIN{found=0} $0==p {found=1} END{exit !found}' >/dev/null 2>&1; then
+    :
+  else
+    tmux_cmd select-window -t "$source_window" >/dev/null 2>&1 || true
+  fi
+
+  if [ -n "$source_pane" ] && ! tmux_cmd list-panes -a -F '#{pane_id}' | awk -v p="$source_pane" '$0 == p { found = 1 } END { exit !found }'; then
+    clear_state
+    fail "Floating pane restore unavailable: original pane gone."
+    logf "restore_popup: source pane missing: $source_pane"
+    case "$tmp_session" in
+      floating-popup-*) tmux_cmd kill-session -t "$tmp_session" >/dev/null 2>&1 || true ;;
+    esac
+    return 0
+  fi
+
+  if [ -n "$tmp_target" ] && [ -n "$source_pane" ]; then
+    local join_cmd=(join-pane -s "$source_pane" -t "$tmp_target")
+    [ -n "$split" ] && join_cmd+=("-$split")
+    [ -n "$size" ] && join_cmd+=(-l "$size")
+    [ "$before" = "1" ] && join_cmd+=(-b)
+    if ! tmux_cmd "${join_cmd[@]}" >/dev/null 2>&1 \
+        || ! pane_exists_in_window "$source_pane" "$source_window"; then
+      state_set "$STATE_ACTIVE" 1
+      fail "Floating pane restore failed safely; pane remains in its popup session."
+      logf "restore_popup: join failed for $source_pane -> $source_window"
+      return 1
+    fi
+  fi
+
+  if [ -n "$source_index" ]; then
+    local target_by_index target_before_restore
+    target_by_index="$(pane_id_at_index "$source_window" "$source_index")"
+    target_before_restore="$(tmux_cmd list-panes -t "$source_window" -F '#{pane_id} #{pane_index}' | awk -v p="$source_pane" '$1 == p { print $2; exit }')"
+    if [ -n "$target_by_index" ] && [ "$target_by_index" != "$source_pane" ] && [ "$target_before_restore" != "$source_index" ]; then
+      tmux_cmd swap-pane -s "$source_pane" -t "$target_by_index" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if [ -n "$client" ] && tmux_cmd display-message -p -c "$client" '#{client_name}' >/dev/null 2>&1; then
+    tmux_cmd switch-client -c "$client" -t "$source_window" >/dev/null 2>&1 || true
+  else
+    tmux_cmd select-window -t "$source_window" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$source_layout" ]; then
+    tmux_cmd select-layout -t "$source_window" "$source_layout" >/dev/null 2>&1 || true
+  fi
+  tmux_cmd select-pane -t "$source_pane" >/dev/null 2>&1 || true
+
+  clear_state
+
+  case "$tmp_session" in
+    floating-popup-*) tmux_cmd kill-session -t "$tmp_session" >/dev/null 2>&1 || true ;;
+  esac
+  if [ -n "$tmp_window" ] && [ -n "$source_window" ] && [ "$tmp_window" != "$source_window" ]; then
+    tmux_cmd kill-window -t "$tmp_window" >/dev/null 2>&1 || true
+  fi
+}
+
+request_restore() {
+  local popup_client="${1:-}" tmp_session
+  [ -n "$popup_client" ] || popup_client="$(tmux_cmd display-message -p '#{client_name}' 2>/dev/null || true)"
+  tmp_session="$(state_get "$STATE_TMP_SESSION" || true)"
+  [ -n "$popup_client" ] && state_set "$STATE_POPUP_CLIENT" "$popup_client"
+  if [ -n "$popup_client" ] && [ "$(tmux_cmd display-message -p -c "$popup_client" '#{session_name}' 2>/dev/null || true)" = "$tmp_session" ]; then
+    tmux_cmd detach-client -t "$popup_client" >/dev/null 2>&1 || true
+  fi
+}
+
+popup_state_dump() {
+  local pane="${1:-}" window layout target split before size
+  if [ -z "$pane" ]; then
+    pane="$(tmux_cmd display-message -p '#{pane_id}')"
+  fi
+  window="$(tmux_cmd display-message -p -t "$pane" '#{window_id}')"
+  layout="$(tmux_cmd display-message -p -t "$pane" '#{window_layout}')"
+  local pane_left pane_top pane_width pane_height pane_right pane_bottom
+  read -r pane_left pane_top pane_width pane_height < <(tmux_cmd display-message -p -t "$pane" '#{pane_left} #{pane_top} #{pane_width} #{pane_height}')
+  pane_right=$((pane_left + pane_width))
+  pane_bottom=$((pane_top + pane_height))
+
+  local -a candidates=()
+  local left top width height id overlap side c
+  while IFS=' ' read -r id left top width height; do
+    [ -z "$id" ] && continue
+    [ "$id" = "$pane" ] && continue
+    local c_left=$left c_top=$top c_width=$width c_height=$height
+    local c_right=$((c_left + c_width)) c_bottom=$((c_top + c_height))
+    overlap=0
+
+    if [ "$c_left" -eq "$pane_right" ] || [ "$c_left" -eq $((pane_right + 1)) ]; then
+      overlap="$(pane_overlap "$c_top" "$c_height" "$pane_top" "$pane_height")"
+      candidates+=("right:$overlap:$id:$pane_width")
+    elif [ "$c_right" -eq "$pane_left" ] || [ $((c_right + 1)) -eq "$pane_left" ]; then
+      overlap="$(pane_overlap "$c_top" "$c_height" "$pane_top" "$pane_height")"
+      candidates+=("left:$overlap:$id:$pane_width")
+    fi
+    if [ "$c_top" -eq "$pane_bottom" ] || [ "$c_top" -eq $((pane_bottom + 1)) ]; then
+      overlap="$(pane_overlap "$c_left" "$c_width" "$pane_left" "$pane_width")"
+      candidates+=("below:$overlap:$id:$pane_height")
+    elif [ "$c_bottom" -eq "$pane_top" ] || [ $((c_bottom + 1)) -eq "$pane_top" ]; then
+      overlap="$(pane_overlap "$c_left" "$c_width" "$pane_left" "$pane_width")"
+      candidates+=("above:$overlap:$id:$pane_height")
+    fi
+  done < <(tmux_cmd list-panes -t "$window" -F '#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}')
+
+  target="" split="" before="0" size=""
+  local best="-1" best_side="" best_line=""
+  for c in "${candidates[@]}"; do
+    IFS=':' read -r side overlap id width <<< "$c"
+    if ((overlap > best)); then
+      best="$overlap"
+      best_side="$side"
+      best_line="$id:$width"
+    fi
+  done
+
+  if [ -z "$best_side" ]; then
+    target="$(tmux_cmd list-panes -t "$window" -F '#{pane_id}' | awk 'NR==1')"
+    printf '%s h 0 \n' "$target"
+    return 0
+  fi
+
+  case "$best_side" in
+    right) split="h"; before="1" ;;
+    left) split="h"; before="0" ;;
+    below) split="v"; before="1" ;;
+    above) split="v"; before="0" ;;
+  esac
+  target="${best_line%%:*}"
+  size="${best_line##*:}"
+  printf '%s %s %s %s\n' "$target" "$split" "$before" "$size"
+}
+
+enter_popup() {
+  local requested_pane="${1:-}" requested_client="${2:-}"
+  local pane window pane_count layout pane_index tmp_info tmp_pane tmp_window tmp_session
+  if [ -z "${TMUX:-}" ]; then
+    fail "Floating popup: TMUX is not set."
+    return 0
+  fi
+
+  if [ -n "$requested_pane" ] && tmux_cmd display-message -p -t "$requested_pane" '#{pane_id}' >/dev/null 2>&1; then
+    pane="$requested_pane"
+  else
+    pane="$(tmux_cmd display-message -p '#{pane_id}')"
+  fi
+  window="$(tmux_cmd display-message -p -t "$pane" '#{window_id}')"
+  pane_index="$(tmux_cmd display-message -p -t "$pane" '#{pane_index}')"
+  pane_count="$(tmux_cmd list-panes -t "$window" | wc -l | tr -d ' ')"
+
+  if [ "$pane_count" -le 1 ]; then
+    tmux_cmd display-message "Floating popup requires at least 2 panes in the current window."
+    return 0
+  fi
+
+  layout="$(tmux_cmd display-message -p -t "$pane" '#{window_layout}')"
+  local popup_info target split before size
+  popup_info="$(popup_state_dump "$pane")"
+  read -r target split before size <<< "$popup_info"
+
+  if ! tmp_info="$(tmux_cmd break-pane -s "$pane" -P -F '#{pane_id}|#{window_id}')"; then
+    fail "Floating popup: failed to break pane."
+    return 0
+  fi
+  tmp_pane="${tmp_info%%|*}"
+  tmp_window="${tmp_info##*|}"
+  if [ -z "$tmp_window" ] || [ "$tmp_window" = "$tmp_info" ]; then
+    [ -z "$tmp_pane" ] || tmp_window="$(tmux_cmd display-message -p -t "$tmp_pane" '#{window_id}' 2>/dev/null || true)"
+  fi
+  if [ -z "$tmp_window" ]; then
+    fail "Floating popup: failed to capture temporary split window."
+    return 0
+  fi
+
+  tmp_session="floating-popup-$$-${RANDOM}"
+  local placeholder_window
+  if ! placeholder_window="$(tmux_cmd new-session -d -s "$tmp_session" -P -F '#{window_id}')"; then
+    fail "Floating popup: failed to create popup session."
+    tmux_cmd kill-window -t "$tmp_window" >/dev/null 2>&1 || true
+    return 0
+  fi
+  if ! tmux_cmd move-window -s "$tmp_window" -t "$tmp_session:"; then
+    fail "Floating popup: failed to move pane into popup session."
+    tmux_cmd kill-session -t "$tmp_session" >/dev/null 2>&1 || true
+    return 0
+  fi
+  tmux_cmd kill-window -t "$placeholder_window" >/dev/null 2>&1 || true
+  tmux_cmd select-window -t "$tmp_window" >/dev/null 2>&1 || true
+  tmux_cmd set-option -t "$tmp_session" status off >/dev/null 2>&1 || true
+
+  set_state "$pane" "$layout" "$window" "$pane_index" "$tmp_window" "$tmp_session" "$target" "$split" "$before" "$size" "$requested_client"
+
+  if [ -n "$requested_client" ]; then
+    local client_width client_height popup_width popup_height popup_left popup_top
+    read -r client_width client_height < <(
+      tmux_cmd list-clients -F '#{client_name} #{client_width} #{client_height} #{client_cell_width} #{client_cell_height}' \
+        | awk -v client="$requested_client" '$1 == client && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $4+0 > 0 && $5+0 > 0 { print $2, $3; exit }'
+    )
+    if [ -z "${client_width:-}" ] || [ -z "${client_height:-}" ]; then
+      read -r client_width client_height < <(tmux_cmd display-message -p -c "$requested_client" '#{client_width} #{client_height}')
+    fi
+    popup_width=$((client_width * 90 / 100))
+    popup_height=$((client_height * 90 / 100))
+    ((popup_width < 1)) && popup_width=1
+    ((popup_height < 1)) && popup_height=1
+    popup_left=$(((client_width - popup_width) / 2 + 1))
+    popup_top=$(((client_height - popup_height) / 2 + 1))
+    state_set "$STATE_POPUP_LEFT" "$popup_left"
+    state_set "$STATE_POPUP_TOP" "$popup_top"
+    state_set "$STATE_POPUP_WIDTH" "$((popup_width > 2 ? popup_width - 2 : 1))"
+    state_set "$STATE_POPUP_HEIGHT" "$((popup_height > 2 ? popup_height - 2 : 1))"
+  fi
+
+  local socket_opt=""
+  [ -z "$TMUX_SOCKET" ] || socket_opt="-S ${TMUX_SOCKET}"
+  local -a popup_target=()
+  [ -n "$requested_client" ] && popup_target=(-c "$requested_client")
+  if ! tmux_cmd display-popup "${popup_target[@]}" -x C -y C -w 90% -h 90% \
+    -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
+    -T "#[fg=#94e2d5,bold] Floating pane ${pane} #[fg=#a6adc8,nobold]— Prefix + z to return " -E \
+    "env -u TMUX -u TMUX_PANE ${TMUX_BIN} ${socket_opt} attach -t '${tmp_session}' ; '${SCRIPT_PATH}' restore"; then
+    fail "Floating popup: failed to open popup (returning)."
+    restore_popup
+    return 0
+  fi
+}
+
+action="${1:-toggle}"
+case "$action" in
+  request-restore) request_restore "${2:-}" ;;
+  restore) restore_popup ;;
+  client-toggle)
+    case "$(state_get "$STATE_ACTIVE" || true)" in
+      1) request_restore "${2:-}" ;;
+      restoring) logf "client-toggle: restore already in progress" ;;
+      *)
+        invoking_client="${2:-}"
+        invoked_pane=""
+        if [ -n "$invoking_client" ]; then
+          invoked_pane="$(tmux_cmd display-message -p -c "$invoking_client" '#{pane_id}' 2>/dev/null || true)"
+        fi
+        if [ -z "$invoked_pane" ]; then
+          fail "Floating popup: could not resolve the client's active pane."
+        else
+          enter_popup "$invoked_pane" "$invoking_client"
+        fi
+        ;;
+    esac
+    ;;
+  toggle|*)
+    case "$(state_get "$STATE_ACTIVE" || true)" in
+      1) restore_popup ;;
+      restoring) logf "toggle: restore already in progress" ;;
+      *) enter_popup "${2:-}" "${3:-}" ;;
+    esac
+    ;;
+esac

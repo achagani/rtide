@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-source "$ROOT/bin/rtide-picker"
+source "$ROOT/libexec/rtide/picker.sh"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 result=$(rtide_picker_decode $'existing\nexisting\tbranch\tclean' create new)
@@ -13,9 +13,10 @@ result=$(rtide_picker_decode $'exis\nexisting\tbranch\tclean' create new)
 [[ "$result" == $'create\texis' ]] \
   || fail 'partial fuzzy match opened an existing item instead of creating exact query'
 
-result=$(rtide_picker_decode $'brand-new\n' create new)
+query_only=$(printf 'brand-new\n')
+result=$(rtide_picker_decode "$query_only" create new)
 [[ "$result" == $'create\tbrand-new' ]] \
-  || fail 'unknown fork query did not create'
+  || fail 'query-only fzf result with stripped trailing newline did not create'
 
 result=$(rtide_picker_decode $'a-very-long-fork-name\n' create new)
 [[ "$result" == $'create\ta-very-long-fork-name' ]] \

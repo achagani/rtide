@@ -67,11 +67,11 @@ speak, press Enter to stop, and the transcript is inserted at the cursor.
   Both the archive and viewer can filter All / Artifacts / Responses; the viewer
   offers PDF export, and Actions → Export output PDF saves a clean file directly.
 - **Files in the editor** — files the agent creates or edits open in the nvim pane
-  via `rtide-open <path>` (a convention the agent follows)
+  via `rtide open <path>` (a convention the agent follows)
 - **Agent-independent memory** — one store every agent reads and writes through the
-  same interface (`rtide-mem`), with an auto-updater that captures `MEM:` lines
+  same interface (`rtide memory`), with an auto-updater that captures `MEM:` lines
 - **Hip shell surface** — `:terminal` in nvim opens your configured shell (fish by
-  default); `tweb-run <cmd>` renders program output in the current workspace's tweb pane
+  default); `rtide run -- <cmd>` renders program output in the current workspace's tweb pane
 - **Multi-tasking** — `prefix+r` jumps between workspaces; `rtide ls` shows the fleet
 
 ## Install
@@ -137,7 +137,7 @@ rtide <dir>      → launch/attach the workspace for <dir> (prompts for provider
 rtide new        → guided new workspace
 rtide fork [session] [window] [name] → fork into an isolated Git worktree, agent session, and tweb pane in a new tmux window
 rtide fork list|resume|stop|status|memories|finish [name] → manage persistent feature forks
-rtide-progress start|checkpoint|complete → publish and continuously rerender the active implementation dashboard
+rtide progress start|checkpoint|complete → publish and continuously rerender the active implementation dashboard
 rtide switch     → same picker as bare rtide (resume / new)
 rtide ls         → list workspaces
 rtide sweep      → capture pending MEM: memories from every live session
@@ -205,7 +205,7 @@ from the agent pane, then kills the session (detaching you back to your shell).
 The agent follows the rules in `AGENTS.md` / `CLAUDE.md` (seeded per project, never
 clobbered): terminal is the input surface (one-line status only), substantive output
 is rendered as HTML in tweb, files it creates or edits are opened in the editor pane
-via `rtide-open <path>`, and durable facts are emitted as `MEM: <slug> — <fact>`
+via `rtide open <path>`, and durable facts are emitted as `MEM: <slug> — <fact>`
 one-liners that the sweep auto-persists to memory.
 
 ## Layout
@@ -215,14 +215,8 @@ Source, installed releases, and runtime state are separate.
 ```
 ~/rtide/                  # source (git repo)
 ├── install.sh
-├── bin/rtide             # workspace launcher
-├── bin/rtide-provider    # provider/harness knowledge base (compat, launch, run, check, models)
-├── bin/rtide-mcp         # MCP wiring helper (tweb + rtide-mem)
-├── bin/rtide-mem         # agent-independent memory (CLI + MCP server)
-├── bin/rtide-agent       # minimal agent input box (status + prompt, renders to tweb)
-├── bin/rtide-open        # open a file in the workspace's nvim pane
-├── bin/tweb-render       # render helper (file / stdin)
-├── bin/tweb-run          # run a command, render output in tweb
+├── bin/rtide             # the only public command
+├── libexec/rtide/        # release-private runtime helpers
 └── share/AGENTS.md       # convention source
     share/template.html   # report template
 
@@ -232,8 +226,7 @@ Source, installed releases, and runtime state are separate.
     └── 0.1.1/            # immutable tested payload
 
 ~/.local/bin/
-├── rtide                 # stable launcher + rollback manager
-└── rtide-agent -> ../lib/rtide/current/bin/rtide-agent
+└── rtide                 # stable launcher + rollback manager
 
 ~/.rtide/                 # runtime (created by install.sh, not in git)
 ├── config                # global provider/harness/model + layout settings
@@ -303,7 +296,7 @@ make stage DESTDIR=/tmp/rtide-package PREFIX=/usr
 
 ### Output routing
 
-Use `tweb-render <file>` or `tweb-run <command>` from an RTIDE agent or nvim terminal.
+Use `rtide render <file>` or `rtide run -- <command>` from an RTIDE agent or nvim terminal.
 The helpers resolve the current tmux session's pane tagged `@rtide-role=tweb`, so
 multiple workspaces cannot steal each other's output. They fail clearly if that pane
 is missing or duplicated instead of starting a blocking browser in the caller's pane.
@@ -311,6 +304,6 @@ Generated command and pipe reports are HTML-escaped and stored under a per-sessi
 cache directory in `~/.cache/rtide/`. Managed pages render one content-size notch
 below the browser default (`RTIDE_TWEB_ZOOM=0.9`, overridable in the environment).
 
-Use `rtide-open <file>` to open a file in the workspace's nvim pane. It finds the
+Use `rtide open <file>` to open a file in the workspace's nvim pane. It finds the
 workspace root (nearest `.rtide/` dir) and talks to nvim over its `--listen` socket
 (`.rtide/nvim.sock`), so it works from any subdirectory and any harness.

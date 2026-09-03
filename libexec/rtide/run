@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# tweb-run — run a command, render its output in tweb.
-#   tweb-run <cmd...>          run and show output (command, output, exit code, duration)
-#   tweb-run --float <cmd...>  run and pop the result to a desktop window
+# rtide run — run a command, render its output in tweb.
+#   rtide run -- <cmd...>          run and show output (command, output, exit code, duration)
+#   rtide run --float -- <cmd...>  run and pop the result to a desktop window
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
-# shellcheck source=bin/rtide-tweb-common
-source "$SCRIPT_DIR/rtide-tweb-common"
+# shellcheck source=libexec/rtide/tweb-common.sh
+source "$SCRIPT_DIR/tweb-common.sh"
 
 FLOAT=0
 [[ "${1:-}" == "--float" ]] && { FLOAT=1; shift; }
-[[ $# -eq 0 ]] && { echo "usage: tweb-run [--float] <cmd...>" >&2; exit 1; }
+[[ $# -eq 0 ]] && { echo "usage: rtide run [--float] -- <cmd...>" >&2; exit 1; }
 
 rtide_tweb_prepare
 OUT="$HOME/.cache/rtide/$RTIDE_TWEB_CACHE_KEY/run.html"

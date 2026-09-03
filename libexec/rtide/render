@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# tweb-render — open a file (or stdin) in the tweb pane.
-#   tweb-render <file>          open a local HTML file
-#   tweb-render --float <file>  open and pop to a desktop window
-#   tweb-render --url <url>     open a URL
-#   cmd | tweb-render -         wrap piped output in a minimal dark page
+# rtide render — open a file (or stdin) in the tweb pane.
+#   rtide render <file>          open a local HTML file
+#   rtide render --float <file>  open and pop to a desktop window
+#   rtide render --url <url>     open a URL
+#   cmd | rtide render -         wrap piped output in a minimal dark page
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
-# shellcheck source=bin/rtide-tweb-common
-source "$SCRIPT_DIR/rtide-tweb-common"
+# shellcheck source=libexec/rtide/tweb-common.sh
+source "$SCRIPT_DIR/tweb-common.sh"
 
 FLOAT=0
 case "${1:-}" in
   --float) FLOAT=1; shift ;;
-  --url)   shift; rtide_tweb_show "${1:?usage: tweb-render --url <url>}" "$FLOAT"; exit ;;
+  --url)   shift; rtide_tweb_show "${1:?usage: rtide render --url <url>}" "$FLOAT"; exit ;;
 esac
 
-FILE="${1:?usage: tweb-render [--float] <file>}"
+FILE="${1:?usage: rtide render [--float] <file>}"
 
 if [[ "$FILE" == "-" ]]; then
   # stdin: wrap piped output in a minimal dark page

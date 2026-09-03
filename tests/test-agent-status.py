@@ -12,7 +12,7 @@ from unittest import mock
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-AGENT_PATH = os.path.join(ROOT, "bin", "rtide-agent")
+AGENT_PATH = os.path.join(ROOT, "libexec", "rtide", "agent")
 LOADER = importlib.machinery.SourceFileLoader("rtide_agent", AGENT_PATH)
 SPEC = importlib.util.spec_from_loader("rtide_agent", LOADER)
 AGENT = importlib.util.module_from_spec(SPEC)

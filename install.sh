@@ -53,8 +53,8 @@ fi
 
 # Direct bootstrap installs may configure per-user integrations. Package-manager
 # staging never runs this script and remains side-effect free.
-if command -v rtide-mcp >/dev/null 2>&1; then
-  rtide-mcp
+if command -v rtide >/dev/null 2>&1; then
+  rtide mcp install
 fi
 if [[ ! -f "$HOME/.claude/CLAUDE.md" ]]; then
   mkdir -p "$HOME/.claude"

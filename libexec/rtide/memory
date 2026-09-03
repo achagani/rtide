@@ -9,7 +9,7 @@ set -euo pipefail
 
 GLOBAL_DIR="$HOME/.rtide/memory"
 PROJECT_DIR="$(pwd)/.rtide/memory"
-MEMORY_INDEX="$(cd "$(dirname "$0")" && pwd)/rtide-memory-index"
+MEMORY_INDEX="$(cd "$(dirname "$0")" && pwd)/memory-index"
 
 mem_dir() { [[ "${1:-project}" == "global" ]] && echo "$GLOBAL_DIR" || echo "$PROJECT_DIR"; }
 

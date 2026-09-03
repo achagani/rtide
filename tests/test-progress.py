@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "rtide-progress"
+SCRIPT = ROOT / "libexec" / "rtide" / "progress"
 
 
 class ProgressTests(unittest.TestCase):

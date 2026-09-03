@@ -32,7 +32,7 @@ assert_no_log() {
 # A managed RTIDE caller must target its own role=tweb pane.
 reset_log
 TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%9 tweb\n' \
-  "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html" || fail 'managed render failed'
+  "$ROOT/bin/rtide" render "$TEST_TMP/pages/page with spaces.html" || fail 'managed render failed'
 assert_log 'navigate --pane %9'
 assert_log 'rtide-output-nav'
 assert_log 'cut+marker.length'
@@ -49,7 +49,7 @@ reset_log
   cd "$TEST_TMP"
   env -u TMUX -u TMUX_PANE RTIDE_TWEB_PANE=%9 RTIDE_TWEB_SESSION_HINT=rtide-alpha \
     FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%9 tweb\n' \
-    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html"
+    "$ROOT/bin/rtide" render "$TEST_TMP/pages/page with spaces.html"
 ) || fail 'direct pane hint render failed'
 assert_log 'navigate --pane %9'
 assert_no_log 'open '
@@ -60,7 +60,7 @@ reset_log
 (
   cd "$TEST_TMP/workspace/subdir"
   env -u TMUX -u TMUX_PANE FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n' \
-    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html"
+    "$ROOT/bin/rtide" render "$TEST_TMP/pages/page with spaces.html"
 ) || fail 'workspace render queue failed'
 grep -Fx '0' "$TEST_TMP/workspace/.rtide/render-request" >/dev/null \
   || fail 'queued render did not preserve float mode'
@@ -74,7 +74,7 @@ assert_no_log 'open '
 reset_log
 RTIDE_REAL_TWEB="$FIXTURES/tweb" RTIDE_WORKSPACE="$TEST_TMP/workspace" \
   FAKE_SESSION=rtide-alpha FAKE_ROLE=tweb FAKE_PANES='%9 tweb\n' \
-  "$ROOT/bin/guard-bin/tweb" split "file://$TEST_TMP/pages/page with spaces.html" \
+  "$ROOT/libexec/rtide/guard-bin/tweb" split "file://$TEST_TMP/pages/page with spaces.html" \
   || fail 'guarded split routing failed'
 assert_log 'navigate --pane %9'
 assert_no_log 'split '
@@ -85,7 +85,7 @@ grep -F "file://$TEST_TMP/pages/page with spaces.html" \
 # Float must target the same pane instead of relying on global inference.
 reset_log
 TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%9 tweb\n' \
-  "$ROOT/bin/tweb-render" --float "$TEST_TMP/pages/page with spaces.html" || fail 'managed float failed'
+  "$ROOT/bin/rtide" render --float "$TEST_TMP/pages/page with spaces.html" || fail 'managed float failed'
 assert_log 'float --pane %9'
 
 # Sandboxed harness commands may have no tmux environment. Resolve the stable
@@ -95,7 +95,7 @@ reset_log
   cd "$TEST_TMP/workspace/subdir"
   env -u TMUX -u TMUX_PANE FAKE_SESSION=rtide-alpha \
     FAKE_PANES='%1 nvim\n%2 agent\n%9 tweb\n' \
-    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html"
+    "$ROOT/bin/rtide" render "$TEST_TMP/pages/page with spaces.html"
 ) || fail 'workspace registration render failed'
 assert_log 'navigate --pane %9'
 assert_no_log 'open '
@@ -103,7 +103,7 @@ assert_no_log 'open '
 # Duplicate role panes are a configuration error and must never spawn a browser.
 reset_log
 if TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%9 tweb\n%10 tweb\n' \
-  "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html" 2>/dev/null; then
+  "$ROOT/bin/rtide" render "$TEST_TMP/pages/page with spaces.html" 2>/dev/null; then
   fail 'duplicate tweb panes unexpectedly succeeded'
 fi
 [[ ! -s "$FAKE_TWEB_LOG" ]] || fail 'duplicate panes invoked tweb'
@@ -114,7 +114,7 @@ reset_log
   cd "$TEST_TMP"
   if env -u TMUX -u TMUX_PANE -u RTIDE_TWEB_MODE -u RTIDE_TWEB_PANE \
     -u RTIDE_TWEB_SESSION_HINT -u RTIDE_WORKSPACE \
-    "$ROOT/bin/tweb-render" "$TEST_TMP/pages/page with spaces.html" \
+    "$ROOT/bin/rtide" render "$TEST_TMP/pages/page with spaces.html" \
     </dev/null >/dev/null 2>/dev/null; then
     fail 'noninteractive standalone render unexpectedly succeeded'
   fi
@@ -125,7 +125,7 @@ reset_log
 reset_log
 printf '<script>alert("x")</script>&\n' | \
   TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%9 tweb\n' \
-  "$ROOT/bin/tweb-render" - || fail 'piped render failed'
+  "$ROOT/bin/rtide" render - || fail 'piped render failed'
 PIPE_FILE="$HOME/.cache/rtide/rtide-alpha-_1/pipe.html"
 grep -F '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;' "$PIPE_FILE" >/dev/null \
   || fail 'piped HTML was not escaped'
@@ -133,7 +133,7 @@ grep -F '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;' "$PIPE_FILE" >/
 # Command and output text must be escaped; the report records the command exit status.
 reset_log
 TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-beta FAKE_PANES='%7 tweb\n' \
-  "$ROOT/bin/tweb-run" /bin/sh -c 'printf "<b>bad & raw</b>"; exit 7' || fail 'command report render failed'
+  "$ROOT/bin/rtide" run -- /bin/sh -c 'printf "<b>bad & raw</b>"; exit 7' || fail 'command report render failed'
 RUN_FILE="$HOME/.cache/rtide/rtide-beta-_1/run.html"
 grep -F '&lt;b&gt;bad &amp; raw&lt;/b&gt;' "$RUN_FILE" >/dev/null || fail 'command output was not escaped'
 grep -F 'exit 7' "$RUN_FILE" >/dev/null || fail 'command exit status was not recorded'

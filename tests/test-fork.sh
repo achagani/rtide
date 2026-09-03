@@ -71,7 +71,7 @@ grep -F 'loose.txt' "$TEST_TMP/fork.err" >/dev/null || fail 'untracked files wer
 [[ ! -e "$FORK/loose.txt" ]] || fail 'untracked file leaked into isolated worktree'
 [[ ! -e "$FORK/.rtide/agent-ready" ]] || fail 'source readiness marker leaked into first fork'
 [[ "$(tmux list-windows -t "$SESSION" | wc -l)" == 1 ]] || fail 'no-launch test unexpectedly created a window'
-grep -F 'launch_fork_window "$sess" "$fork_dir" "$name"' "$ROOT/bin/rtide" >/dev/null \
+grep -F 'launch_fork_window "$sess" "$fork_dir" "$name" "$initial_prompt" "$target_client"' "$ROOT/bin/rtide" >/dev/null \
   || fail 'new fork window does not use the selected fork name'
 if HOME="$TEST_TMP/home" RTIDE_FORK_NO_LAUNCH=1 \
     "$ROOT/bin/rtide" fork "$SESSION" "$WINDOW" test-fork >/dev/null 2>&1; then

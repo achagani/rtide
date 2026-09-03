@@ -2,17 +2,23 @@
 # Shared RTIDE searchable-picker policies.
 
 rtide_picker_decode() {
-  local output="$1" policy="$2" create_token="${3:-create}" query selected selected_name plain
+  local output="$1" policy="$2" create_token="${3:-create}" query selected selected_name plain has_selection=0
   query=$(printf '%s\n' "$output" | head -1)
   selected=$(printf '%s\n' "$output" | tail -1)
+  # Command substitution removes fzf's trailing newline. A query-only result is
+  # therefore one line, while --print-query plus a selected row contains a
+  # newline. Keep tab-delimited one-line rows valid for selection-only callers.
+  if [[ "$output" == *$'\n'* || "$selected" == *$'\t'* ]]; then
+    has_selection=1
+  fi
   selected_name=${selected%%$'\t'*}
   plain=$(printf '%s' "$selected_name" | sed -E $'s/\033\\[[0-9;]*m//g')
-  if [[ -n "$selected" && "$selected" != *$'\t'"$create_token"$'\t'* \
+  if (( has_selection )) && [[ -n "$selected" && "$selected" != *$'\t'"$create_token"$'\t'* \
       && ( "$policy" == select || -z "$query" || "$query" == "$selected_name" || "$query" == "$plain" ) ]]; then
     printf 'open\t%s\n' "$selected"
   elif [[ "$policy" == create && -n "$query" ]]; then
     printf 'create\t%s\n' "$query"
-  elif [[ "$policy" == create && "$selected" == *$'\t'"$create_token"$'\t'* ]]; then
+  elif (( has_selection )) && [[ "$policy" == create && "$selected" == *$'\t'"$create_token"$'\t'* ]]; then
     printf 'create\t\n'
   elif [[ "$policy" == freeform && -n "$query" ]]; then
     printf 'value\t%s\n' "$query"

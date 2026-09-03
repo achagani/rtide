@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Shared output routing for tweb-render and tweb-run.
+# Shared output routing for rtide render and rtide run.
 # Call rtide_tweb_prepare before choosing a cache path, then rtide_tweb_show.
 
 rtide_tweb_prepare() {

@@ -41,9 +41,13 @@ for signal in 'ready_nvim' 'ready_tweb' 'ready_agent'; do
   grep -F "$signal" <<< "$fork_launch_source" >/dev/null \
     || fail "fork launcher does not wait for $signal"
 done
-last_select=$(grep -n 'tmux select-window -t "$fork_window"' <<< "$fork_launch_source" | tail -1 | cut -d: -f1)
+last_select=$(grep -n 'tmux switch-client -c "$target_client" -t "$fork_window"' <<< "$fork_launch_source" | tail -1 | cut -d: -f1)
 ready_check=$(grep -n 'launch incomplete' <<< "$fork_launch_source" | tail -1 | cut -d: -f1)
-(( last_select > ready_check )) || fail 'fork window is selected before readiness completes'
+(( last_select > ready_check )) || fail 'invoking client is switched before readiness completes'
+grep -F 'client=$(tmux display-message -p -t "$pane" '\''#{client_name}'\''' <<< "$(sed -n '/^cmd_fork_menu()/,/^cmd_fork_new_popup()/p' "$ROOT/bin/rtide")" >/dev/null \
+  || fail 'Fork Manager does not capture its invoking tmux client'
+grep -F 'tmux switch-client -c "$target_client" -t "$running"' <<< "$fork_launch_source" >/dev/null \
+  || fail 'resume does not activate an already-running fork for the invoking client'
 grep -F '"Fork Manager…"' "$ROOT/bin/rtide" >/dev/null \
   || fail 'actions menu does not expose the Fork Manager'
 grep -F 'Escape' "$ROOT/bin/rtide" >/dev/null \
@@ -74,10 +78,22 @@ for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 
   grep -F "$action" <<< "$manager_source" >/dev/null \
     || fail "Fork Manager is missing lifecycle action: $action"
 done
+grep -F 'Permanent removal' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager removal does not confirm inside the interactive popup'
+grep -F 'Yes — finish and remove worktree' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager removal lacks an explicit confirmation choice'
+action_source=$(sed -n '/^cmd_fork_menu_action()/,/^dispatch_fork_menu_action()/p' "$ROOT/bin/rtide")
+if grep -F 'read -r answer' <<< "$action_source" >/dev/null; then
+  fail 'background Fork Manager action still attempts to read confirmation from stdin'
+fi
 grep -F 'dispatch_fork_menu_action' <<< "$manager_source" >/dev/null \
   || fail 'Fork Manager does not use its outside-popup action dispatcher'
-grep -F 'dispatch_fork_menu_action create "$selected" "$pane"' <<< "$manager_source" >/dev/null \
+grep -F 'dispatch_fork_menu_action create "$selected" "$pane" "$client"' <<< "$manager_source" >/dev/null \
   || fail 'Fork Manager creation still runs in the popup-owned process'
+grep -F 'with-nth=1,3,4,6) || true' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager discards unmatched queries when fzf returns nonzero'
+grep -F '[[ -n "$output" ]] || return 0' <<< "$manager_source" >/dev/null \
+  || fail 'Fork Manager does not distinguish a printed query from cancellation'
 dispatch_source=$(sed -n '/^dispatch_fork_menu_action()/,/^cmd_fork_menu()/p' "$ROOT/bin/rtide")
 grep -F 'tmux run-shell -b "$command"' <<< "$dispatch_source" >/dev/null \
   || fail 'Fork Manager dispatcher is not owned by the tmux server'
@@ -108,6 +124,9 @@ for diagnostic in 'fork-launch.json' 'fork-launch-nvim.log' 'fork-launch-tweb.lo
 done
 grep -F 'fork_launch_notice' <<< "$launch_source" >/dev/null \
   || fail 'fork readiness failures are not announced to the user'
+pane_popup_source=$(sed -n '/^cmd_pane_popup()/,/^bind_if_free()/p' "$ROOT/bin/rtide")
+grep -F 'request-restore "$client"' <<< "$pane_popup_source" >/dev/null \
+  || fail 'RTIDE does not pass the nested popup client to targeted restore'
 grep -F 'failed readiness' <<< "$launch_source" >/dev/null \
   || fail 'fork readiness status does not record the failed stage'
 
@@ -115,10 +134,15 @@ python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
 BASE="$TEST_TMP/build/rtide-$(tr -d '[:space:]' < "$ROOT/VERSION")"
 [[ -f "$BASE/share/assets/rtide-mark.png" ]] || fail 'release payload omitted the RTIDE logo'
-[[ -x "$BASE/bin/rtide-forks" && -x "$BASE/bin/rtide-memory-index" ]] \
+[[ -x "$BASE/libexec/rtide/forks" && -x "$BASE/libexec/rtide/memory-index" ]] \
   || fail 'release payload omitted fork manager helpers'
-[[ -x "$BASE/bin/rtide-picker" ]] || fail 'release payload omitted the shared picker helper'
-[[ -x "$BASE/bin/rtide-progress" ]] || fail 'release payload omitted implementation dashboard helper'
+[[ -x "$BASE/libexec/rtide/picker.sh" ]] || fail 'release payload omitted the shared picker helper'
+[[ -x "$BASE/libexec/rtide/progress" ]] || fail 'release payload omitted implementation dashboard helper'
+[[ -x "$BASE/libexec/rtide/pane-popup" ]] || fail 'release payload omitted pane popup helper'
+[[ "$(find "$BASE/bin" -mindepth 1 -maxdepth 1 -printf '%f\n')" == rtide ]] \
+  || fail 'release payload exposes commands other than rtide'
+grep -F 'helper="$RTIDE_LIBEXEC_DIR/pane-popup"' "$BASE/bin/rtide" >/dev/null \
+  || fail 'packaged RTIDE does not use its packaged pane popup helper'
 grep -F 'src="assets/rtide-mark.png"' "$BASE/share/welcome.html" >/dev/null \
   || fail 'welcome screen does not use the packaged logo'
 
@@ -133,11 +157,17 @@ make_payload() {
 
 # Migrate an existing source link into a stable launcher and immutable release.
 ln -s "$ROOT/bin/rtide" "$RTIDE_BIN_DIR/rtide"
+ln -s "$RTIDE_INSTALL_ROOT/current/bin/rtide-open" "$RTIDE_BIN_DIR/rtide-open"
+printf 'user owned\n' > "$RTIDE_BIN_DIR/tweb-run"
 FIRST=$(make_payload 0.1.1)
 bash "$ROOT/scripts/install-user" "$FIRST" >/dev/null
 [[ -f "$HOME/.rtide/memory/.index-v2/index.json" ]] \
   || fail 'installation did not create the additive global memory index'
 [[ ! -L "$RTIDE_BIN_DIR/rtide" && -x "$RTIDE_BIN_DIR/rtide" ]] || fail 'stable launcher was not installed'
+[[ ! -e "$RTIDE_BIN_DIR/rtide-open" && ! -L "$RTIDE_BIN_DIR/rtide-open" ]] \
+  || fail 'managed legacy helper symlink was not removed'
+grep -Fx 'user owned' "$RTIDE_BIN_DIR/tweb-run" >/dev/null \
+  || fail 'installer removed a user-owned legacy-named file'
 [[ "$(readlink "$RTIDE_INSTALL_ROOT/current")" == versions/0.1.1 ]] || fail 'initial release was not activated'
 [[ "$(rtide --version)" == 'rtide 0.1.1' ]] || fail 'installed version is incorrect'
 grep -F "$RTIDE_INSTALL_ROOT/versions/0.1.1" <(rtide version --verbose) >/dev/null \
@@ -183,11 +213,13 @@ grep -F '* 0.1.4' <(rtide versions) >/dev/null || fail 'versions did not mark ac
 rtide use 0.1.3 >/dev/null
 [[ "$(rtide --version)" == 'rtide 0.1.3' ]] || fail 'rollback did not activate requested release'
 
-# Package staging is contained entirely beneath DESTDIR and uses flat links.
+# Package staging is contained entirely beneath DESTDIR and exposes only rtide.
 STAGE="$TEST_TMP/stage"
 DESTDIR="$STAGE" PREFIX=/usr bash "$ROOT/scripts/stage-package" "$FIRST" >/dev/null
 [[ -x "$STAGE/usr/lib/rtide/bin/rtide" ]] || fail 'staged payload is missing rtide'
 [[ "$(readlink "$STAGE/usr/bin/rtide")" == ../lib/rtide/bin/rtide ]] || fail 'staged command link is incorrect'
+[[ "$(find "$STAGE/usr/bin" -mindepth 1 -maxdepth 1 -printf '%f\n')" == rtide ]] \
+  || fail 'package staging exposed private helper commands'
 HOME="$TEST_TMP/package-home" "$STAGE/usr/lib/rtide/bin/rtide" --version \
   | grep -Fx 'rtide 0.1.1' >/dev/null || fail 'staged payload is not relocatable'
 [[ ! -e "$TEST_TMP/package-home" ]] || fail 'package staging modified user state'

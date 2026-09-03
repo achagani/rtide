@@ -26,9 +26,10 @@ import threading
 import urllib.parse
 
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
-RTIDE_BIN = os.path.join(SELF_DIR, "rtide")
-PROVIDER_BIN = os.path.join(SELF_DIR, "rtide-provider")
-TWEB_RENDER = os.path.join(SELF_DIR, "tweb-render")
+RTIDE_ROOT = os.path.realpath(os.environ.get("RTIDE_ROOT", os.path.join(SELF_DIR, "..", "..")))
+RTIDE_BIN = os.path.join(RTIDE_ROOT, "bin", "rtide")
+PROVIDER_BIN = os.path.join(SELF_DIR, "provider")
+TWEB_RENDER = os.path.join(SELF_DIR, "render")
 
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -46,7 +47,7 @@ DEV_BADGE = f"{ORANGE}[DEV]{RESET} " if DEV_MODE else ""
 VOICE_CONTROL = f"\0337\033[999C\033[10D{MAGENTA}🎙 voice{RESET}\0338"
 PROMPT = (f"\001{ORANGE if DEV_MODE else CYAN}\002╰─❯\001{RESET}\002 "
           f"\001{VOICE_CONTROL}\002")
-PROMPT_PLAIN = DEV_BADGE + "╰─❯ " + VOICE_CONTROL
+PROMPT_PLAIN = "╰─❯ " + VOICE_CONTROL
 
 # Turn input() into a real line editor: cursor movement, word movement, and
 # insertion at the cursor instead of an append/backspace-only cooked line.
@@ -362,7 +363,9 @@ def working_status(tool=None, elapsed=0, queued=0, reset_prompt=False):
     # ANSI sequences do not consume columns. Budget using only visible text,
     # and collapse tool arguments so a status can never wrap the 3-line pane.
     queue = f" q{queued}" if queued else ""
-    dev_prefix = "DEV " if DEV_MODE else ""
+    # DEV_BADGE renders as "[DEV] "; use that exact visible width so narrow
+    # prompt panes never wrap the live status line.
+    dev_prefix = "[DEV] " if DEV_MODE else ""
     prefix = f"{dev_prefix}● working {timer}{queue}"
     width = shutil.get_terminal_size((80, 24)).columns
     room = max(0, width - len(prefix) - (3 if detail else 0))
@@ -780,7 +783,7 @@ def start_reply_server():
         def do_POST(self):
             if self.path == "/pdf/" + token and session:
                 subprocess.Popen(
-                    [os.path.join(SELF_DIR, "rtide"), "pdf", pane],
+                    [RTIDE_BIN, "pdf", pane],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )

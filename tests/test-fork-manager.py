@@ -8,7 +8,7 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "rtide-forks"
+SCRIPT = ROOT / "libexec" / "rtide" / "forks"
 
 
 class ForkManagerTests(unittest.TestCase):

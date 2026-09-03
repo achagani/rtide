@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "bin" / "rtide-memory-index"
+SCRIPT = ROOT / "libexec" / "rtide" / "memory-index"
 
 
 class MemoryIndexTests(unittest.TestCase):

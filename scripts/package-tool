@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import tarfile
 
-PAYLOAD_DIRS = ("bin", "share")
+PAYLOAD_DIRS = ("bin", "libexec", "share")
 PAYLOAD_FILES = ("VERSION",)
 PAYLOAD_ASSETS = (("docs/assets/rtide-mark.png", "share/assets/rtide-mark.png"),)
 
@@ -126,6 +126,17 @@ def verify(payload: Path) -> None:
         raise SystemExit("BUILD-INFO content digest does not match runtime contents")
     if not (payload / "bin" / "rtide").is_file():
         raise SystemExit("payload is missing bin/rtide")
+    public_entries = sorted(path.name for path in (payload / "bin").iterdir())
+    if public_entries != ["rtide"]:
+        raise SystemExit(f"payload exposes unexpected public commands: {public_entries}")
+    required_helpers = (
+        "agent", "dictate", "fork-status", "forks", "mcp", "memory",
+        "memory-index", "open", "pane-popup", "picker.sh", "progress",
+        "provider", "render", "run", "tweb-common.sh", "guard-bin/tweb",
+    )
+    missing_helpers = [name for name in required_helpers if not (payload / "libexec" / "rtide" / name).is_file()]
+    if missing_helpers:
+        raise SystemExit(f"payload is missing private helpers: {missing_helpers}")
     print(f"verified rtide {version}: {digest(manifest)[:12]}")
 
 

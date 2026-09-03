@@ -7,11 +7,20 @@ set -euo pipefail
 SERVERS=(tweb rtide-mem)
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || realpath "$0")
 SELF_DIR=$(dirname "$SCRIPT_PATH")
+RTIDE_ROOT="${RTIDE_ROOT:-$(cd "$SELF_DIR/../.." && pwd)}"
+RTIDE_COMMAND="${RTIDE_COMMAND:-$(command -v rtide 2>/dev/null || printf '%s\n' "$RTIDE_ROOT/bin/rtide")}"
 
 server_command() {
   case "$1" in
     tweb) command -v tweb ;;
-    rtide-mem) printf '%s\n' "$SELF_DIR/rtide-mem" ;;
+    rtide-mem) printf '%s\n' "$RTIDE_COMMAND" ;;
+  esac
+}
+
+server_args() {
+  case "$1" in
+    tweb) printf '%s\n' mcp ;;
+    rtide-mem) printf '%s\n' memory mcp ;;
   esac
 }
 
@@ -27,10 +36,11 @@ registered() { # $1=harness $2=server
 if command -v claude >/dev/null 2>&1; then
   for s in "${SERVERS[@]}"; do
     command=$(server_command "$s")
+    mapfile -t args < <(server_args "$s")
     if registered claude "$s"; then
       echo "claude: $s already registered"
     else
-      claude mcp add "$s" "$command" mcp >/dev/null 2>&1 \
+      claude mcp add "$s" "$command" "${args[@]}" >/dev/null 2>&1 \
         && echo "claude: added $s" || echo "claude: FAILED to add $s"
     fi
   done
@@ -40,10 +50,11 @@ fi
 if command -v codex >/dev/null 2>&1; then
   for s in "${SERVERS[@]}"; do
     command=$(server_command "$s")
+    mapfile -t args < <(server_args "$s")
     if registered codex "$s"; then
       echo "codex: $s already registered"
     else
-      codex mcp add "$s" -- "$command" mcp >/dev/null 2>&1 \
+      codex mcp add "$s" -- "$command" "${args[@]}" >/dev/null 2>&1 \
         && echo "codex: added $s" || echo "codex: FAILED to add $s"
     fi
   done
@@ -53,10 +64,11 @@ fi
 if command -v hermes >/dev/null 2>&1; then
   for s in "${SERVERS[@]}"; do
     command=$(server_command "$s")
+    mapfile -t args < <(server_args "$s")
     if registered hermes "$s"; then
       echo "hermes: $s already registered"
     else
-      printf 'Y\n' | hermes mcp add "$s" --command "$command" --args mcp >/dev/null 2>&1 \
+      printf 'Y\n' | hermes mcp add "$s" --command "$command" --args "${args[@]}" >/dev/null 2>&1 \
         && echo "hermes: added $s" || echo "hermes: FAILED to add $s"
     fi
   done
@@ -78,7 +90,8 @@ if os.path.exists(cfg):
         data = json.load(f)
 mcp = data.setdefault("mcp", {})
 for s, command in servers.items():
-    mcp[s] = {"type": "stdio", "command": command, "args": ["mcp"], "enabled": True}
+    args = ["mcp"] if s == "tweb" else ["memory", "mcp"]
+    mcp[s] = {"type": "stdio", "command": command, "args": args, "enabled": True}
 with open(cfg, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")

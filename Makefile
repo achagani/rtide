@@ -3,16 +3,16 @@ SHELL := /bin/bash
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 PAYLOAD := $(CURDIR)/build/rtide-$(VERSION)
 BASH_SOURCES := install.sh \
-	bin/rtide bin/rtide-mcp bin/rtide-mem bin/rtide-open \
-	bin/rtide-forks \
-	bin/rtide-picker \
-	bin/rtide-memory-index \
-	bin/rtide-progress \
-	bin/rtide-provider bin/rtide-tweb-common bin/tweb-render bin/tweb-run \
+	bin/rtide \
+	libexec/rtide/mcp libexec/rtide/memory libexec/rtide/open \
+	libexec/rtide/pane-popup libexec/rtide/picker.sh \
+	libexec/rtide/provider libexec/rtide/render libexec/rtide/run \
+	libexec/rtide/tweb-common.sh libexec/rtide/guard-bin/tweb \
 	scripts/check-version-bump scripts/install-user scripts/rtide-dev \
 	scripts/rtide-launcher scripts/stage-package
-PYTHON_SOURCES := bin/rtide-agent bin/rtide-dictate bin/rtide-fork-status scripts/bump-version \
-	bin/rtide-forks bin/rtide-memory-index scripts/package-tool \
+PYTHON_SOURCES := libexec/rtide/agent libexec/rtide/dictate \
+	libexec/rtide/fork-status libexec/rtide/forks libexec/rtide/memory-index \
+	libexec/rtide/progress scripts/bump-version scripts/package-tool \
 	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py \
 	tests/test-progress.py
 
@@ -30,9 +30,12 @@ test: check
 	./tests/test-picker-contract.sh
 	./tests/test-fork-snapshot.sh
 	./tests/test-fork-launch-status.sh
+	./tests/test-pane-popup-safety.sh
 	./tests/test-permissions.sh
+	./tests/test-libexec-isolation.sh
 	./tests/test-output-routing.sh
 	./tests/test-fork.sh
+	python3 -m unittest tests/test-fork-menu-e2e.py
 	python3 -m unittest tests/test-agent-status.py
 	python3 -m unittest tests/test-fork-manager.py
 	python3 -m unittest tests/test-memory-index.py

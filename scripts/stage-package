@@ -10,12 +10,9 @@ DESTDIR="${DESTDIR:?DESTDIR is required for package staging}"
 PREFIX="${PREFIX:-/usr/local}"
 LIB_DIR="$DESTDIR$PREFIX/lib/rtide"
 BIN_DIR="$DESTDIR$PREFIX/bin"
-COMMANDS=(rtide rtide-picker rtide-provider rtide-mcp rtide-mem rtide-forks rtide-fork-status rtide-memory-index rtide-progress rtide-agent rtide-dictate rtide-open tweb-render tweb-run)
 
 python3 "$ROOT/scripts/package-tool" verify "$PAYLOAD" >/dev/null
 mkdir -p "$LIB_DIR" "$BIN_DIR"
 cp -a "$PAYLOAD/." "$LIB_DIR/"
-for command in "${COMMANDS[@]}"; do
-  ln -sfn "../lib/rtide/bin/$command" "$BIN_DIR/$command"
-done
+ln -sfn "../lib/rtide/bin/rtide" "$BIN_DIR/rtide"
 echo "staged rtide $VERSION under $DESTDIR$PREFIX"
