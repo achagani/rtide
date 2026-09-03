@@ -24,6 +24,7 @@ export RTIDE_CONFIG_DIR="$CONFIG_DIR"
 export RTIDE_SESSION_PREFIX="rtide-dev-"
 export RTIDE_DEV_MODE=1
 export RTIDE_DEV_LABEL="${RTIDE_DEV_LABEL:-DEVELOPMENT}"
+export RTIDE_DEV_WORKTREE="${RTIDE_DEV_WORKTREE:-$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$DIR")}"
 if (( $# )); then
   exec "$ROOT/bin/rtide" "$@"
 fi

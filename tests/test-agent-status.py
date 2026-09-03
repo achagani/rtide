@@ -84,6 +84,17 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn('os.environ.get("RTIDE_DEV_MODE") == "1"', source)
         self.assertIn("DEV_BADGE", source)
 
+    def test_development_result_shows_absolute_worktree(self):
+        with mock.patch.object(AGENT, "DEV_WORKTREE", "/workspace/rtide-feature"):
+            page = AGENT.build_result_html("Request", "Answer", "feature", 1)
+        self.assertIn("DEVELOPMENT WORKTREE", page)
+        self.assertIn("/workspace/rtide-feature", page)
+
+    def test_release_result_has_no_development_worktree_banner(self):
+        with mock.patch.object(AGENT, "DEV_WORKTREE", ""):
+            page = AGENT.build_result_html("Request", "Answer", "feature", 1)
+        self.assertNotIn("DEVELOPMENT WORKTREE", page)
+
     def test_window_activity_animates_and_restores_base_name(self):
         location = mock.Mock(returncode=0, stdout="@7\tfeature-one\n")
         stored = mock.Mock(returncode=0, stdout="feature-one\n")

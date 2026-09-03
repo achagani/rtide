@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -16,8 +17,17 @@ class ProgressTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_progress(self, *args):
-        return subprocess.run(["python3", SCRIPT, "--workspace", self.workspace, "--no-render", *args], capture_output=True, text=True)
+    def run_progress(self, *args, env=None):
+        return subprocess.run(["python3", SCRIPT, "--workspace", self.workspace, "--no-render", *args], capture_output=True, text=True, env=env)
+
+    def test_development_dashboard_shows_absolute_worktree(self):
+        environment = os.environ.copy()
+        environment.update({"RTIDE_DEV_MODE": "1", "RTIDE_DEV_WORKTREE": "/workspace/rtide-feature"})
+        result = self.run_progress("init", "Dev output", "--steps", "Build", env=environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        page = (self.workspace / ".tweb/implementation-dev-output.html").read_text()
+        self.assertIn("DEVELOPMENT WORKTREE", page)
+        self.assertIn("/workspace/rtide-feature", page)
 
     def test_dashboard_tracks_substeps_and_completion(self):
         result = self.run_progress("init", "Menu feature", "--objective", "Build it", "--steps", "Audit", "Implement", "Test")
