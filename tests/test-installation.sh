@@ -20,6 +20,26 @@ export RTIDE_INSTALL_ROOT="$HOME/.local/lib/rtide"
 export RTIDE_BIN_DIR="$HOME/.local/bin"
 mkdir -p "$RTIDE_BIN_DIR" "$TEST_TMP/build" "$TEST_TMP/dist"
 
+# The managed worktree root is visible and persistently configurable.
+mkdir -p "$HOME/.rtide"
+cat > "$HOME/.rtide/config" <<'EOF'
+provider=
+harness=
+model=
+default_dir=
+agent_lines=3
+tweb_pct=60
+shell=bash
+auto_float=false
+worktree_root=
+EOF
+configured_root="$TEST_TMP/configured-worktrees"
+bash "$ROOT/bin/rtide" config set "worktree_root=$configured_root" >/dev/null
+grep -Fx "worktree_root=$configured_root" "$HOME/.rtide/config" >/dev/null \
+  || fail 'config did not persist the managed worktree root'
+grep -F "worktree_root $configured_root" <(bash "$ROOT/bin/rtide" config) >/dev/null \
+  || fail 'config did not display the managed worktree root'
+
 # Development dispatch uses source directly and isolated configuration.
 dev_version=$(bash "$ROOT/scripts/rtide-dev" "$TEST_TMP/dev workspace" --version)
 [[ "$dev_version" == "rtide $(tr -d '[:space:]' < "$ROOT/VERSION")" ]] || fail 'development runner did not use source'
@@ -74,7 +94,7 @@ manager_source=$(sed -n '/^cmd_fork_menu()/,/^cmd_fork_new_popup()/p' "$ROOT/bin
 if grep -F -- '--preview-window=right:' <<< "$manager_source" >/dev/null; then
   fail 'Fork Manager still uses a clipping side preview'
 fi
-for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Repair runtime state' 'Finish and remove'; do
+for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Repair runtime state' 'Move to managed storage' 'Finish and remove'; do
   grep -F "$action" <<< "$manager_source" >/dev/null \
     || fail "Fork Manager is missing lifecycle action: $action"
 done

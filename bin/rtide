@@ -239,6 +239,7 @@ agent_lines=$agent_lines
 tweb_pct=$tweb_pct
 shell=$shell
 auto_float=$auto_float
+worktree_root=
 EOF
   echo "Saved to $CONFIG"
 }
@@ -249,7 +250,7 @@ cmd_setup() {
 }
 
 cmd_doctor() {
-  local ok=1
+  local ok=1 repo outer
   for c in tweb tmux nvim; do
     command -v "$c" >/dev/null 2>&1 || { echo "MISSING: $c"; ok=0; }
   done
@@ -275,6 +276,13 @@ cmd_doctor() {
       "$PROVIDER_BIN" check "$p" || ok=0
     fi
   fi
+  repo=$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || true)
+  if [[ -n "$repo" ]]; then
+    echo "worktree root: $(fork_worktree_parent "$repo")"
+    if outer=$(enclosing_repository_root "$repo"); then
+      echo "WARN: independent Git checkout is nested inside $outer"
+    fi
+  fi
   if [[ $ok -eq 1 ]]; then echo "doctor: all good"; fi
   return $((1 - ok))
 }
@@ -283,6 +291,49 @@ cmd_new() {
   ndir=$(cancellable_input "Directory for new workspace" "$(pwd)") \
     || { echo "new workspace cancelled"; return 0; }
   exec "$0" "$ndir"
+}
+
+fork_primary_root() {
+  local root="$1"
+  git -C "$root" worktree list --porcelain \
+    | awk '$1=="worktree"{print $2; exit}'
+}
+
+fork_worktree_parent() {
+  local root="$1" primary storage base identity configured=""
+  primary=$(fork_primary_root "$root")
+  [[ -n "$primary" ]] || { echo "fork: repository has no primary worktree" >&2; return 1; }
+  primary=$(realpath -m "$primary")
+  if [[ -f "$CONFIG" ]]; then
+    configured=$(sed -n 's/^worktree_root=//p' "$CONFIG" | tail -1)
+  fi
+  storage="${RTIDE_WORKTREE_ROOT:-${configured:-${XDG_DATA_HOME:-$HOME/.local/share}/rtide/worktrees}}"
+  storage=$(realpath -m "$storage")
+  base=$(basename "$primary" | tr -cs 'A-Za-z0-9._-' '-')
+  identity=$(printf '%s' "$primary" | git hash-object --stdin | cut -c1-12)
+  printf '%s/%s-%s\n' "$storage" "$base" "$identity"
+}
+
+prepare_fork_worktree_parent() {
+  local root="$1" parent="$2" enclosing
+  mkdir -p "$parent"
+  enclosing=$(git -C "$parent" rev-parse --show-toplevel 2>/dev/null || true)
+  if [[ -n "$enclosing" ]]; then
+    echo "fork: managed worktree root is inside a Git repository: $(realpath -m "$enclosing")" >&2
+    echo "fork: set RTIDE_WORKTREE_ROOT to a directory outside every repository" >&2
+    return 2
+  fi
+}
+
+enclosing_repository_root() {
+  local root="$1" parent enclosing
+  root=$(realpath -m "$root")
+  parent=$(dirname "$root")
+  enclosing=$(git -C "$parent" rev-parse --show-toplevel 2>/dev/null || true)
+  [[ -n "$enclosing" ]] || return 1
+  enclosing=$(realpath -m "$enclosing")
+  [[ "$enclosing" != "$root" ]] || return 1
+  printf '%s\n' "$enclosing"
 }
 
 fork_running_window() {
@@ -467,7 +518,7 @@ fork_root_from_context() {
 }
 
 cmd_fork_manager() {
-  local action="${2:-list}" selector="${3:-}" context_pane="${4:-${TMUX_PANE:-}}" target_client="${5:-}" sess root item path window
+  local action="${2:-list}" selector="${3:-}" context_pane="${4:-${TMUX_PANE:-}}" target_client="${5:-}" sess root item path window parent destination
   sess=$(tmux display-message -p -t "$context_pane" '#{session_name}' 2>/dev/null || true)
   root=$(fork_root_from_context "$context_pane") || { echo "fork: not in a Git repository" >&2; return 1; }
   case "$action" in
@@ -520,7 +571,39 @@ cmd_fork_manager() {
       find "$path/.rtide/nvim.sock" -maxdepth 0 -type s -delete 2>/dev/null || true
       echo "fork: repaired runtime state for $selector; source and history preserved"
       ;;
-    *) echo "usage: rtide fork list|resume|stop|status|memories|finish|remove|repair [name]" >&2; return 2 ;;
+    migrate)
+      item=$("$RTIDE_LIBEXEC_DIR/forks" --root "$root" status "${selector:?usage: rtide fork migrate <name>}" --json) || return
+      path=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<< "$item")
+      window=$(fork_running_window "$sess" "$path")
+      [[ -z "$window" ]] || { echo "fork: stop the runtime before migrating: $selector" >&2; return 2; }
+      parent=$(fork_worktree_parent "$root") || return
+      prepare_fork_worktree_parent "$root" "$parent" || return
+      destination="$parent/$(basename "$path")"
+      [[ "$(realpath -m "$path")" != "$(realpath -m "$destination")" ]] \
+        || { echo "fork: already in managed storage: $selector"; return 0; }
+      [[ ! -e "$destination" ]] || { echo "fork: migration destination exists: $destination" >&2; return 2; }
+      git -C "$root" worktree move "$path" "$destination"
+      python3 - "$path" "$destination" <<'PY'
+from pathlib import Path
+import sys
+
+old, new = sys.argv[1:]
+root = Path(new)
+files = [root / ".rtide" / "output-history.json", root / ".rtide" / "fork-context.md"]
+if (root / ".tweb").is_dir():
+    files.extend((root / ".tweb").rglob("*.html"))
+for file in files:
+    try:
+        text = file.read_text(encoding="utf-8")
+    except OSError:
+        continue
+    updated = text.replace("file://" + old, "file://" + new).replace(old, new)
+    if updated != text:
+        file.write_text(updated, encoding="utf-8")
+PY
+      echo "fork: migrated $selector to $destination"
+      ;;
+    *) echo "usage: rtide fork list|resume|stop|status|memories|finish|remove|repair|migrate [name]" >&2; return 2 ;;
   esac
 }
 
@@ -544,6 +627,7 @@ cmd_fork_menu_action() {
       ${EDITOR:-nvim} "$path/.rtide/memory/.index-v2/index.json"
       ;;
     repair) "$0" fork repair "$name" "$pane" ;;
+    migrate) "$0" fork migrate "$name" "$pane" ;;
     remove) "$0" fork remove "$name" "$pane" ;;
     *) return 2 ;;
   esac
@@ -594,7 +678,8 @@ cmd_fork_menu() {
   IFS=$'\t' read -r name branch state ahead path memories <<< "$selected"
   action=$(printf '%s\n' \
     $'resume\tResume or switch' $'status\tView status' $'stop\tStop runtime' \
-    $'memories\tReview memories' $'repair\tRepair runtime state' $'remove\tFinish and remove' \
+    $'memories\tReview memories' $'repair\tRepair runtime state' \
+    $'migrate\tMove to managed storage' $'remove\tFinish and remove' \
     | fzf --layout=reverse --border=rounded --height=100% \
       --delimiter=$'\t' --with-nth=2 \
       --header=$'Fork actions\n'"$name · $state · $ahead" \
@@ -647,10 +732,10 @@ cmd_fork() {
   # untracked runtime helper. Git worktrees cannot contain that helper, so stop
   # before creating a deceptively valid but unrunnable fork.
   validate_fork_snapshot "$root" || exit $?
-  primary=$(git -C "$root" worktree list --porcelain | awk '$1=="worktree"{print $2; exit}')
-  parent=$(dirname "$primary")/.rtide-worktrees
+  primary=$(fork_primary_root "$root")
+  parent=$(fork_worktree_parent "$root") || exit
   base=$(basename "$primary")
-  mkdir -p "$parent"
+  prepare_fork_worktree_parent "$root" "$parent" || exit
   number=1
   while git -C "$root" show-ref --verify --quiet "refs/heads/rtide/fork-$number" \
       || [[ -e "$parent/$base-fork-$number" ]]; do
@@ -1048,11 +1133,12 @@ cmd_auth() {
 
 # --- config & refresh -------------------------------------------------------
 
-CONFIG_KEYS="provider harness model default_dir agent_lines tweb_pct shell auto_float"
+CONFIG_KEYS="provider harness model default_dir agent_lines tweb_pct shell auto_float worktree_root"
 
 # Rewrite ~/.rtide/config from the current shell vars (only known keys).
 write_global_config() {
   local key
+  worktree_root="${worktree_root:-}"
   {
     echo "# RTIDE config"
     for key in $CONFIG_KEYS; do
@@ -1070,6 +1156,7 @@ cmd_config() {
   local sub="${2:-}" key val scope def
   [[ -f "$CONFIG" ]] && source "$CONFIG"
   tweb_pct="${tweb_pct:-${nvim_pct:-60}}"
+  worktree_root="${worktree_root:-}"
   case "$sub" in
     "")
       printf 'agent  %-12s %s\n' provider "$provider"
@@ -1080,6 +1167,7 @@ cmd_config() {
       printf 'layout %-12s %s\n' shell "$shell"
       printf 'layout %-12s %s\n' auto_float "$auto_float"
       printf 'misc   %-12s %s\n' default_dir "$default_dir"
+      printf 'misc   %-12s %s\n' worktree_root "${worktree_root:-${XDG_DATA_HOME:-$HOME/.local/share}/rtide/worktrees}"
       ;;
     set)
       shift 2
@@ -1088,7 +1176,7 @@ cmd_config() {
         key="${kv%%=*}"; val="${kv#*=}"
         [[ "$key" == "$kv" || -z "$key" ]] && { echo "config error: bad assignment '$kv' (want key=value)" >&2; exit 1; }
         case "$key" in
-          provider|harness|model|default_dir|shell) ;;
+          provider|harness|model|default_dir|shell|worktree_root) ;;
           agent_lines)
             [[ "$val" =~ ^[0-9]+$ ]] && (( val >= 1 )) \
               || { echo "config error: agent_lines must be a positive integer" >&2; exit 1; } ;;
@@ -1112,7 +1200,7 @@ cmd_config() {
       case "$scope" in
         layout) agent_lines=3; tweb_pct=60; auto_float=false; shell="$def" ;;
         agent)  provider=""; harness=""; model="" ;;
-        all)    provider=""; harness=""; model=""; agent_lines=3; tweb_pct=60; auto_float=false; shell="$def" ;;
+        all)    provider=""; harness=""; model=""; agent_lines=3; tweb_pct=60; auto_float=false; shell="$def"; worktree_root="" ;;
         *) echo "usage: rtide config reset [layout|agent|all]" >&2; exit 1 ;;
       esac
       write_global_config
@@ -1599,7 +1687,7 @@ case "${1:-}" in
   doctor) cmd_doctor; exit 0 ;;
   new)    cmd_new ;;
   fork)
-    case "${2:-}" in list|resume|stop|status|finish|memories|remove|repair) cmd_fork_manager "$@" ;; *) cmd_fork "$@" ;; esac
+    case "${2:-}" in list|resume|stop|status|finish|memories|remove|repair|migrate) cmd_fork_manager "$@" ;; *) cmd_fork "$@" ;; esac
     exit 0 ;;
   fork-menu) cmd_fork_menu "$@"; exit 0 ;;
   fork-menu-action) cmd_fork_menu_action "$@"; exit 0 ;;

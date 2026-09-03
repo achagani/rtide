@@ -77,6 +77,10 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
   that worktree, and verify the location with `git status --short --branch` and
   `git worktree list` before editing. Reserve the primary checkout for release
   integration, installation, and emergency recovery.
+- RTIDE-created conversation forks use global managed storage outside Git
+  repositories. Set `RTIDE_WORKTREE_ROOT` temporarily or `worktree_root` in
+  `~/.rtide/config` persistently; stop a legacy fork before moving it with
+  `rtide fork migrate <name>`.
 
 ## Files in the editor
 - After creating or editing a file, run `rtide open <path>` to open it in the

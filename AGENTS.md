@@ -99,6 +99,11 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
   that worktree, and keep the primary checkout for release integration,
   installation, and emergency recovery. Before editing, confirm `git status
   --short --branch` and `git worktree list` identify the intended worktree.
+- RTIDE-created conversation forks use the global managed root
+  `${XDG_DATA_HOME:-~/.local/share}/rtide/worktrees` (or
+  `RTIDE_WORKTREE_ROOT` / `worktree_root` in `~/.rtide/config`) so they cannot
+  become nested repositories. Stop a registered legacy worktree before running
+  `rtide fork migrate <name>` to move it into managed storage.
 - This repository is the RTIDE source checkout; editing `bin/`, `share/`, or other
   project files is not by itself a completed laptop installation.
 - Runtime source changes must increment the source-controlled `VERSION` exactly
