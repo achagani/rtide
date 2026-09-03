@@ -39,6 +39,7 @@ if [[ -f "$DIR/.rtide/agent" ]]; then
   mv "$tmp" "$DIR/.rtide/agent"
 fi
 export RTIDE_DEV_PERMISSION_POLICY="$PERMISSION_POLICY"
+export RTIDE_DEV_PERMISSION_CONFIRMED=1
 printf 'RTIDE DEVELOPMENT: worktree=%s permissions=%s\n' "$RTIDE_DEV_WORKTREE" "$PERMISSION_POLICY" >&2
 if (( $# )); then
   exec "$ROOT/bin/rtide" "$@"

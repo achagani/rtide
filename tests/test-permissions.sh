@@ -41,5 +41,9 @@ grep -Fx 'permission_policy=workspace' "$TEST_TMP/workspace/.rtide/agent" >/dev/
 
 grep -F 'RTIDE_DEV_PERMISSION_POLICY="$(or $(PERMISSION),unrestricted)"' "$ROOT/Makefile" >/dev/null \
   || fail 'make dev does not default permission to unrestricted'
+grep -F 'export RTIDE_DEV_PERMISSION_CONFIRMED=1' "$ROOT/scripts/rtide-dev" >/dev/null \
+  || fail 'development launcher does not pre-confirm its explicit permission policy'
+grep -F 'RTIDE_DEV_PERMISSION_CONFIRMED' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'agent picker ignores development permission confirmation'
 
 printf 'PASS: installed workspaces default safe and development defaults to unrestricted\n'

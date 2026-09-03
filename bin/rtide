@@ -175,7 +175,8 @@ prompt_selection() {
   models=$("$PROVIDER_BIN" models "$PROVIDER")
   MODEL=$(pick "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models) || return $?
   PERMISSION_POLICY=$(pick "Agent permissions" "$current_permission" workspace observe native unrestricted) || return $?
-  if [[ "$PERMISSION_POLICY" == unrestricted ]]; then
+  if [[ "$PERMISSION_POLICY" == unrestricted \
+      && "${RTIDE_DEV_PERMISSION_CONFIRMED:-0}" != 1 ]]; then
     printf 'WARNING: unrestricted agents can read and modify files outside this workspace and access tmux.\n' >&2
     local confirm
     confirm=$(cancellable_input "Type UNRESTRICTED to confirm" "") || return 130
