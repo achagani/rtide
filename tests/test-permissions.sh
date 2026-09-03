@@ -43,6 +43,8 @@ grep -F 'RTIDE_DEV_PERMISSION_POLICY="$(or $(PERMISSION),unrestricted)"' "$ROOT/
   || fail 'make dev does not default permission to unrestricted'
 grep -F 'export RTIDE_DEV_PERMISSION_CONFIRMED=1' "$ROOT/scripts/rtide-dev" >/dev/null \
   || fail 'development launcher does not pre-confirm its explicit permission policy'
+grep -F 'export RTIDE_ASK="${RTIDE_ASK:-0}"' "$ROOT/scripts/rtide-dev" >/dev/null \
+  || fail 'development launcher does not skip the redundant startup agent picker'
 grep -F 'RTIDE_DEV_PERMISSION_CONFIRMED' "$ROOT/bin/rtide" >/dev/null \
   || fail 'agent picker ignores development permission confirmation'
 

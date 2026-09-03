@@ -40,6 +40,10 @@ if [[ -f "$DIR/.rtide/agent" ]]; then
 fi
 export RTIDE_DEV_PERMISSION_POLICY="$PERMISSION_POLICY"
 export RTIDE_DEV_PERMISSION_CONFIRMED=1
+# Development startup should use the workspace/global agent configuration. The
+# agent picker remains available from RTIDE after launch, but must not turn a
+# normal `make dev` into an implicit setup wizard whose cancellation exits 130.
+export RTIDE_ASK="${RTIDE_ASK:-0}"
 printf 'RTIDE DEVELOPMENT: worktree=%s permissions=%s\n' "$RTIDE_DEV_WORKTREE" "$PERMISSION_POLICY" >&2
 if (( $# )); then
   exec "$ROOT/bin/rtide" "$@"
