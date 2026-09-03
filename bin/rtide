@@ -1563,6 +1563,12 @@ esac
 [[ -f "$CONFIG" ]] || cmd_setup
 source "$CONFIG"
 
+# Development launchers intentionally default to host access so RTIDE itself
+# can exercise tmux. Normal installed workspaces retain the workspace default.
+if [[ "$DEV_MODE" == 1 && -n "${RTIDE_DEV_PERMISSION_POLICY:-}" ]]; then
+  permission_policy="$RTIDE_DEV_PERMISSION_POLICY"
+fi
+
 # legacy: agent= → harness=
 harness="${harness:-${agent:-}}"
 agent_lines="${agent_lines:-3}"   # agent strip height in lines — minimal input box (status + prompt)
@@ -1649,7 +1655,7 @@ fi
 
 # The agent pane runs the minimal input-box wrapper (rtide-agent), which
 # invokes the harness non-interactively per request and renders to tweb.
-permission_policy="${permission_policy:-workspace}"
+permission_policy="${permission_policy:-${RTIDE_DEV_PERMISSION_POLICY:-workspace}}"
 AGENT_CMD="$RTIDE_AGENT_CMD $harness $provider $model $DIR $permission_policy"
 
 # Build the layout with pane IDs (index-agnostic — respects base-index settings).

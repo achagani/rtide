@@ -5,6 +5,9 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 DIR=$(realpath -m "${1:-.}")
 shift || true
+PERMISSION_POLICY="${RTIDE_DEV_PERMISSION_POLICY:-unrestricted}"
+[[ "$PERMISSION_POLICY" =~ ^(workspace|observe|native|unrestricted)$ ]] \
+  || { echo "invalid development permission policy: $PERMISSION_POLICY" >&2; exit 2; }
 if [[ "${RTIDE_DEV_STATE:-isolated}" == shared ]]; then
   CONFIG_DIR="$HOME/.rtide"
 else
@@ -25,6 +28,18 @@ export RTIDE_SESSION_PREFIX="rtide-dev-"
 export RTIDE_DEV_MODE=1
 export RTIDE_DEV_LABEL="${RTIDE_DEV_LABEL:-DEVELOPMENT}"
 export RTIDE_DEV_WORKTREE="${RTIDE_DEV_WORKTREE:-$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$DIR")}"
+if [[ -f "$DIR/.rtide/agent" ]]; then
+  tmp="$DIR/.rtide/agent.tmp"
+  awk -v value="$PERMISSION_POLICY" '
+    BEGIN { found=0 }
+    /^permission_policy=/ { print "permission_policy=" value; found=1; next }
+    { print }
+    END { if (!found) print "permission_policy=" value }
+  ' "$DIR/.rtide/agent" > "$tmp"
+  mv "$tmp" "$DIR/.rtide/agent"
+fi
+export RTIDE_DEV_PERMISSION_POLICY="$PERMISSION_POLICY"
+printf 'RTIDE DEVELOPMENT: worktree=%s permissions=%s\n' "$RTIDE_DEV_WORKTREE" "$PERMISSION_POLICY" >&2
 if (( $# )); then
   exec "$ROOT/bin/rtide" "$@"
 fi

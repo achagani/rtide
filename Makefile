@@ -49,7 +49,7 @@ clean:
 	@printf 'CLEAN OK: removed generated build and distribution artifacts\n'
 
 dev:
-	bash scripts/rtide-dev "$(or $(DIR),.)" $(ARGS)
+	RTIDE_DEV_PERMISSION_POLICY="$(or $(PERMISSION),unrestricted)" bash scripts/rtide-dev "$(or $(DIR),.)" $(ARGS)
 
 install: build
 	bash scripts/install-user "$(PAYLOAD)"

@@ -27,4 +27,19 @@ HOME="$TEST_TMP/home" "$ROOT/bin/rtide" permissions workspace "$TEST_TMP/workspa
 grep -Fx 'permission_policy=workspace' "$TEST_TMP/workspace/.rtide/agent" >/dev/null \
   || fail 'workspace sandbox could not be restored'
 
-printf 'PASS: workspace permissions default safe and support explicit unrestricted Codex access\n'
+# Development defaults to unrestricted and supports an explicit safe override.
+HOME="$TEST_TMP/home" RTIDE_DEV_PERMISSION_POLICY=unrestricted \
+  bash "$ROOT/scripts/rtide-dev" "$TEST_TMP/workspace" --version >/dev/null 2>"$TEST_TMP/dev.err"
+grep -Fx 'permission_policy=unrestricted' "$TEST_TMP/workspace/.rtide/agent" >/dev/null \
+  || fail 'development launcher did not default the workspace to unrestricted'
+grep -F 'permissions=unrestricted' "$TEST_TMP/dev.err" >/dev/null \
+  || fail 'development launcher did not display its effective permissions'
+HOME="$TEST_TMP/home" RTIDE_DEV_PERMISSION_POLICY=workspace \
+  bash "$ROOT/scripts/rtide-dev" "$TEST_TMP/workspace" --version >/dev/null 2>/dev/null
+grep -Fx 'permission_policy=workspace' "$TEST_TMP/workspace/.rtide/agent" >/dev/null \
+  || fail 'explicit development workspace override was ignored'
+
+grep -F 'RTIDE_DEV_PERMISSION_POLICY="$(or $(PERMISSION),unrestricted)"' "$ROOT/Makefile" >/dev/null \
+  || fail 'make dev does not default permission to unrestricted'
+
+printf 'PASS: installed workspaces default safe and development defaults to unrestricted\n'
