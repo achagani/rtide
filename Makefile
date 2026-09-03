@@ -30,6 +30,7 @@ test: check
 	./tests/test-picker-contract.sh
 	./tests/test-fork-snapshot.sh
 	./tests/test-fork-launch-status.sh
+	./tests/test-permissions.sh
 	./tests/test-output-routing.sh
 	./tests/test-fork.sh
 	python3 -m unittest tests/test-agent-status.py

@@ -97,12 +97,23 @@ launch() { # $1=harness $2=provider $3=model
 
 # Non-interactive one-shot command for the rtide-agent wrapper.
 # $1=harness $2=provider $3=model $4=prompt $5=session (optional)
+# $6=permission policy: workspace (default), observe, native, unrestricted
 # Emits a single shell command (env setup + harness invocation) that the
 # wrapper runs via `bash -c`. Auto-accepts file edits (claude acceptEdits /
 # codex workspace-write sandbox) since there's no interactive prompt.
 run() {
-  local harness="$1" provider="$2" model="$3" prompt="$4" session="${5:-}"
-  local q envs cmd
+  local harness="$1" provider="$2" model="$3" prompt="$4" session="${5:-}" permission="${6:-workspace}"
+  local q envs cmd codex_new_permission codex_resume_permission
+  case "$permission" in
+    workspace) codex_new_permission='--sandbox workspace-write'; codex_resume_permission='' ;;
+    observe) codex_new_permission='--sandbox read-only'; codex_resume_permission='' ;;
+    native) codex_new_permission=''; codex_resume_permission='' ;;
+    unrestricted)
+      codex_new_permission='--sandbox danger-full-access'
+      codex_resume_permission='--dangerously-bypass-approvals-and-sandbox'
+      ;;
+    *) echo "unsupported permission policy: $permission" >&2; return 2 ;;
+  esac
   q=$(printf '%q' "$prompt")
   envs=$(env_for "$harness" "$provider" "$model")
   case "$harness:$provider" in
@@ -111,16 +122,16 @@ run() {
       ;;
     codex:openai)
       if [[ -n "$session" ]]; then
-        cmd="codex exec resume $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec resume $codex_resume_permission $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
       else
-        cmd="codex exec $q --model $model --json --sandbox workspace-write --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec $q --model $model --json $codex_new_permission --skip-git-repo-check -c model_reasoning_effort=none"
       fi
       ;;
     codex:ollama)
       if [[ -n "$session" ]]; then
-        cmd="codex exec resume $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec resume $codex_resume_permission $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
       else
-        cmd="codex exec $q --oss --local-provider ollama --model $model --json --sandbox workspace-write --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec $q --oss --local-provider ollama --model $model --json $codex_new_permission --skip-git-repo-check -c model_reasoning_effort=none"
       fi
       ;;
     hermes:*)

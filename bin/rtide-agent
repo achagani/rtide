@@ -6,7 +6,7 @@ one-line status in the agent pane, and renders each response as a standalone
 designed result with a separate history index in tweb. Files the agent creates/edits open in nvim via
 `rtide-open` (see AGENTS.md).
 
-Usage: rtide-agent <harness> <provider> <model> <dir>
+Usage: rtide-agent <harness> <provider> <model> <dir> [permission-policy]
 """
 import html as H
 import datetime
@@ -387,11 +387,10 @@ def error_status(msg):
     status(f"{RED}●{RESET} error: {msg[:100]}")
 
 
-def get_run_cmd(harness, provider, model, prompt, session):
+def get_run_cmd(harness, provider, model, prompt, session, permission="workspace"):
     """Ask rtide-provider for the non-interactive command for one request."""
     args = [PROVIDER_BIN, "run", harness, provider, model, prompt]
-    if session:
-        args.append(session)
+    args.extend([session or "", permission])
     out = subprocess.run(args, capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip() or "rtide-provider run failed")
@@ -970,9 +969,10 @@ def write_history_pages(tweb_dir, entries, workspace):
 
 def main():
     if len(sys.argv) < 5:
-        print("usage: rtide-agent <harness> <provider> <model> <dir>", file=sys.stderr)
+        print("usage: rtide-agent <harness> <provider> <model> <dir> [permission-policy]", file=sys.stderr)
         sys.exit(1)
     harness, provider, model, wdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    permission = sys.argv[5] if len(sys.argv) > 5 else "workspace"
     wdir = os.path.realpath(wdir)
     os.chdir(wdir)
 
@@ -1087,7 +1087,7 @@ def main():
             harness_request = request_with_fork_context(
                 req, session_id, fork_context_path
             )
-            cmd = get_run_cmd(harness, provider, model, harness_request, session_id)
+            cmd = get_run_cmd(harness, provider, model, harness_request, session_id, permission)
             text, sid, rc, newly_queued, steer, interrupted = run_harness(
                 cmd, harness, working_status, last_request, len(pending)
             )

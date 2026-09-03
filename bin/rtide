@@ -155,9 +155,9 @@ pick() {
 }
 
 # prompt_selection <cur_provider> <cur_harness> <cur_model> — sets PROVIDER/HARNESS/MODEL
-PROVIDER=""; HARNESS=""; MODEL=""
+PROVIDER=""; HARNESS=""; MODEL=""; PERMISSION_POLICY="workspace"
 prompt_selection() {
-  local installed providers avail models
+  local installed providers avail models current_permission="${4:-workspace}"
   installed=$(installed_harnesses)
   providers=$(providers_for_installed)
   [[ -n "$providers" ]] || { echo "no agents found — install one first"; exit 1; }
@@ -174,6 +174,13 @@ prompt_selection() {
   # model — default to the current one (free text allowed, so no availability check)
   models=$("$PROVIDER_BIN" models "$PROVIDER")
   MODEL=$(pick "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models) || return $?
+  PERMISSION_POLICY=$(pick "Agent permissions" "$current_permission" workspace observe native unrestricted) || return $?
+  if [[ "$PERMISSION_POLICY" == unrestricted ]]; then
+    printf 'WARNING: unrestricted agents can read and modify files outside this workspace and access tmux.\n' >&2
+    local confirm
+    confirm=$(cancellable_input "Type UNRESTRICTED to confirm" "") || return 130
+    [[ "$confirm" == UNRESTRICTED ]] || { echo "unrestricted permission was not enabled" >&2; return 130; }
+  fi
 }
 
 # --- commands --------------------------------------------------------------
@@ -183,7 +190,7 @@ setup_wizard() {
   local installed; installed=$(installed_harnesses)
   [[ -n "$installed" ]] || { echo "no agents found — install one first"; exit 1; }
   echo "Installed agents: $installed"
-  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}" || return 130
+  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}" "${permission_policy:-workspace}" || return 130
   default_dir=$(cancellable_input "Default directory (empty = current dir)" "") || return 130
   agent_lines=$(cancellable_input "Agent strip lines" "3") || return 130
   tweb_pct=$(cancellable_input "tweb width %" "60") || return 130
@@ -204,6 +211,7 @@ setup_wizard() {
 provider=$PROVIDER
 harness=$HARNESS
 model=$MODEL
+permission_policy=$PERMISSION_POLICY
 default_dir=$default_dir
 agent_lines=$agent_lines
 tweb_pct=$tweb_pct
@@ -282,7 +290,7 @@ fork_launch_notice() {
 
 launch_fork_window() {
   local sess="$1" fork_dir="$2" label="$3" initial_prompt="${4:-}"
-  local provider harness model agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready marker
+  local provider harness model permission_policy agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready marker
   local ready_nvim=0 ready_tweb=0 ready_agent=0 deadline status_file log_file failed
   local running
   running=$(fork_running_window "$sess" "$fork_dir")
@@ -299,6 +307,7 @@ launch_fork_window() {
   [[ -f "$CONFIG" ]] && source "$CONFIG"
   [[ -f "$fork_dir/.rtide/agent" ]] && source "$fork_dir/.rtide/agent"
   harness="${harness:-${agent:-}}"; agent_lines="${agent_lines:-3}"
+  permission_policy="${permission_policy:-workspace}"
   tweb_pct="${tweb_pct:-60}"; shell="${shell:-bash}"
   fork_window=$(tmux new-window -d -P -F '#{window_id}' -t "$sess:" -n "$label" -c "$fork_dir")
   printf 'window=%s\n' "$fork_window" >> "$log_file"
@@ -327,7 +336,7 @@ launch_fork_window() {
   fi
   tmux send-keys -t "$tweb_pane" "tweb open '$first_page'" Enter
   find "$fork_dir/.rtide/agent-ready" -maxdepth 0 -type f -delete 2>/dev/null || true
-  tmux send-keys -t "$agent_pane" "$RTIDE_AGENT_CMD $harness $provider $model $fork_dir" Enter
+  tmux send-keys -t "$agent_pane" "$RTIDE_AGENT_CMD $harness $provider $model $fork_dir $permission_policy" Enter
   printf 'nvim_pane=%s\nagent_pane=%s\ntweb_pane=%s\npage=%s\n' \
     "$nvim_pane" "$agent_pane" "$tweb_pane" "$first_page" >> "$log_file"
   write_fork_launch_status "$status_file" waiting readiness 0 0 0 "Waiting for nvim, tweb, and agent"
@@ -920,22 +929,58 @@ cmd_agent() {
   [[ -f "$CONFIG" ]] && source "$CONFIG"
   local ws="$dir/$WS_AGENT_FILE"
   [[ -f "$ws" ]] && source "$ws"
-  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}"
-  provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"
+  prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}" "${permission_policy:-workspace}"
+  provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"; permission_policy="$PERMISSION_POLICY"
   mkdir -p "$(dirname "$ws")"
   cat > "$ws" <<EOF
 provider=$provider
 harness=$harness
 model=$model
+permission_policy=$permission_policy
 EOF
-  echo "agent: $harness + $provider ($model) for $dir"
+  echo "agent: $harness + $provider ($model), permissions=$permission_policy for $dir"
   local pane
   pane=$(tmux list-panes -a -F '#{pane_id}\t#{@rtide-role}\t#{pane_current_path}' 2>/dev/null \
     | awk -F '\t' -v d="$(realpath -m "$dir")" '$2=="agent" && $3==d{print $1; exit}')
   if [[ -n "$pane" ]]; then
     tmux send-keys -t "$pane" C-c
-    tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir" Enter
+    tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir $permission_policy" Enter
     echo "restarted agent pane $pane"
+  fi
+  exit 0
+}
+
+cmd_permissions() {
+  local policy="${2:-}" dir="${3:-$(pwd)}" ws tmp pane provider harness model permission_policy
+  [[ "$policy" =~ ^(workspace|observe|native|unrestricted)$ ]] \
+    || { echo "usage: rtide permissions workspace|observe|native|unrestricted [directory]" >&2; exit 2; }
+  dir=$(realpath -m "$dir")
+  ws="$dir/$WS_AGENT_FILE"
+  [[ -f "$ws" ]] || { echo "permissions: no workspace agent config at $ws" >&2; exit 1; }
+  if [[ "$policy" == unrestricted ]]; then
+    printf 'WARNING: unrestricted agents can access tmux and read or modify files outside %s.\n' "$dir" >&2
+    [[ "${RTIDE_CONFIRM_UNRESTRICTED:-}" == UNRESTRICTED ]] \
+      || { echo "permissions: rerun with RTIDE_CONFIRM_UNRESTRICTED=UNRESTRICTED" >&2; exit 2; }
+  fi
+  tmp="$ws.tmp"
+  awk -v value="$policy" '
+    BEGIN { found=0 }
+    /^permission_policy=/ { print "permission_policy=" value; found=1; next }
+    { print }
+    END { if (!found) print "permission_policy=" value }
+  ' "$ws" > "$tmp"
+  mv "$tmp" "$ws"
+  printf 'permissions: %s for %s\n' "$policy" "$dir"
+  pane=$(tmux list-panes -a -F '#{pane_id}\t#{@rtide-role}\t#{pane_current_path}' 2>/dev/null \
+    | awk -F '\t' -v d="$dir" '$2=="agent" && $3==d{print $1; exit}' || true)
+  if [[ -n "$pane" ]]; then
+    source "$ws"
+    harness="${harness:-${agent:-}}"
+    tmux send-keys -t "$pane" C-c
+    tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir $permission_policy" Enter
+    echo "permissions: restarted agent pane $pane"
+  else
+    echo "permissions: takes effect when this workspace agent next starts"
   fi
   exit 0
 }
@@ -1498,6 +1543,7 @@ case "${1:-}" in
   quit)   cmd_quit "$@" ;;
   kill)   cmd_quit "$@" ;;
   agent)  cmd_agent "$@" ;;
+  permissions) cmd_permissions "$@" ;;
   auth)   cmd_auth "$@" ;;
   config) cmd_config "$@" ;;
   refresh) cmd_refresh "$@" ;;
@@ -1576,13 +1622,14 @@ WS_AGENT="$DIR/$WS_AGENT_FILE"
 [[ -f "$WS_AGENT" ]] && source "$WS_AGENT"
 harness="${harness:-${agent:-}}"
 if [[ "${RTIDE_ASK:-1}" != "0" ]]; then
-  prompt_selection "${provider:-}" "${harness:-}" "${model:-}"
-  provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"
+  prompt_selection "${provider:-}" "${harness:-}" "${model:-}" "${permission_policy:-workspace}"
+  provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"; permission_policy="$PERMISSION_POLICY"
   mkdir -p "$(dirname "$WS_AGENT")"
   cat > "$WS_AGENT" <<EOF
 provider=$provider
 harness=$harness
 model=$model
+permission_policy=$permission_policy
 EOF
 fi
 
@@ -1602,7 +1649,8 @@ fi
 
 # The agent pane runs the minimal input-box wrapper (rtide-agent), which
 # invokes the harness non-interactively per request and renders to tweb.
-AGENT_CMD="$RTIDE_AGENT_CMD $harness $provider $model $DIR"
+permission_policy="${permission_policy:-workspace}"
+AGENT_CMD="$RTIDE_AGENT_CMD $harness $provider $model $DIR $permission_policy"
 
 # Build the layout with pane IDs (index-agnostic — respects base-index settings).
 # Each pane gets a pane-scoped @rtide-role option (survives title changes by apps).

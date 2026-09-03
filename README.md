@@ -144,6 +144,7 @@ rtide sweep      → capture pending MEM: memories from every live session
 rtide quit [dir] → sweep that session's memories, then kill it (from inside or out)
 rtide kill [dir] → alias for quit
 rtide agent      → re-pick provider/harness/model for the current workspace
+rtide permissions unrestricted [dir] → allow the workspace agent to access tmux and the full host filesystem (explicit confirmation required)
 rtide config     → view/edit/reset the global config (set key=value, reset [layout|agent|all])
 rtide refresh    → apply the global config's layout to a running workspace (prefix+R)
 rtide layout-reset [session] → restore nvim 40%, tweb 60%, and the three-line prompt
