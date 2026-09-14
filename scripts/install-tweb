@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Install TWeb from its supported source Makefile when no executable is present.
+set -euo pipefail
+
+command -v tweb >/dev/null 2>&1 && {
+  echo '   tweb already installed'
+  exit 0
+}
+
+TWEB_SOURCE_URL="${RTIDE_TWEB_SOURCE_URL:-https://github.com/keyolk/tweb.git}"
+TWEB_SOURCE_DIR="${RTIDE_TWEB_SOURCE_DIR:-$HOME/.local/src/tweb}"
+TWEB_PREFIX="${RTIDE_TWEB_PREFIX:-$HOME/.local}"
+command -v git >/dev/null 2>&1 || { echo 'tweb: git is required for source fallback' >&2; exit 1; }
+command -v make >/dev/null 2>&1 || { echo 'tweb: make is required for source fallback' >&2; exit 1; }
+
+if [[ ! -d "$TWEB_SOURCE_DIR" ]]; then
+  mkdir -p "$(dirname "$TWEB_SOURCE_DIR")"
+  echo "   cloning tweb source: $TWEB_SOURCE_URL"
+  git clone --depth 1 "$TWEB_SOURCE_URL" "$TWEB_SOURCE_DIR"
+elif [[ ! -f "$TWEB_SOURCE_DIR/Makefile" ]]; then
+  echo "tweb: source directory has no Makefile: $TWEB_SOURCE_DIR" >&2
+  exit 1
+else
+  echo "   using existing tweb source: $TWEB_SOURCE_DIR"
+fi
+
+echo "   installing tweb under $TWEB_PREFIX"
+make -C "$TWEB_SOURCE_DIR" install PREFIX="$TWEB_PREFIX"
+export PATH="$TWEB_PREFIX/bin:$PATH"
+if ! command -v tweb >/dev/null 2>&1 && [[ ! -x "$TWEB_PREFIX/bin/tweb" ]]; then
+  echo "tweb: source install completed but no executable was found under $TWEB_PREFIX/bin" >&2
+  exit 1
+fi
+echo "   tweb ready: ${TWEB_PREFIX}/bin/tweb"

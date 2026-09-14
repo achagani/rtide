@@ -105,9 +105,12 @@ is present; an existing non-LazyVim config is moved to a timestamped
 modifying system Python. Use `--without-lazyvim`, `--without-voice`, or
 `--without-deps` only to keep an intentional custom setup.
 
-TWeb and agent CLIs/authentication remain explicit external installs: TWeb is a
-separately distributed terminal browser runtime, and RTIDE cannot safely choose
-an agent or log it in for you. Run `rtide doctor` after bootstrap for the exact
+When `tweb` is missing, the default installer clones
+`https://github.com/keyolk/tweb.git` into `~/.local/src/tweb` and runs its
+supported `make install` target under `~/.local`. Override the source or paths
+with `RTIDE_TWEB_SOURCE_URL`, `RTIDE_TWEB_SOURCE_DIR`, and `RTIDE_TWEB_PREFIX`.
+Agent CLIs/authentication remain explicit because RTIDE cannot safely choose an
+agent or log it in for you. Run `rtide doctor` after bootstrap for the exact
 remaining checks.
 
 To remove RTIDE later, run `rtide uninstall`. Add `--purge` to also remove the

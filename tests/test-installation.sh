@@ -169,6 +169,10 @@ grep -F 'existing Neovim config preserved at' "$ROOT/scripts/install-lazyvim" >/
   || fail 'LazyVim bootstrap does not preserve an existing Neovim config'
 grep -F 'LazyVim already active' "$ROOT/scripts/install-lazyvim" >/dev/null \
   || fail 'LazyVim bootstrap does not recognize an existing LazyVim config'
+grep -F 'https://github.com/keyolk/tweb.git' "$ROOT/scripts/install-tweb" >/dev/null \
+  || fail 'TWeb source fallback URL is missing'
+grep -F 'scripts/install-tweb' "$ROOT/install.sh" >/dev/null \
+  || fail 'installer does not invoke the TWeb source fallback'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null

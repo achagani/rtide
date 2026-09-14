@@ -57,6 +57,7 @@ fi
 
 if (( WITH_DEPS )); then
   "$REPO_DIR/scripts/install-deps"
+  "$REPO_DIR/scripts/install-tweb"
 fi
 if (( WITH_LAZYVIM )); then
   "$REPO_DIR/scripts/install-lazyvim"
