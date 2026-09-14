@@ -173,6 +173,8 @@ grep -F 'https://github.com/keyolk/tweb.git' "$ROOT/scripts/install-tweb" >/dev/
   || fail 'TWeb source fallback URL is missing'
 grep -F 'scripts/install-tweb' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not invoke the TWeb source fallback'
+grep -F 'cargo' "$ROOT/scripts/install-deps" >/dev/null \
+  || fail 'dependency installer does not provision Cargo for TWeb'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null

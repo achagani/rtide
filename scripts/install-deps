@@ -3,7 +3,7 @@
 set -euo pipefail
 
 missing=()
-for command in git tmux nvim fish fzf python3; do
+for command in git tmux nvim fish fzf python3 cargo; do
   command -v "$command" >/dev/null 2>&1 || missing+=("$command")
 done
 if ! command -v kitty >/dev/null 2>&1 && ! command -v ghostty >/dev/null 2>&1; then
@@ -28,11 +28,11 @@ done
 
 packages=()
 case "$manager" in
-  apt-get) packages=(git tmux neovim fish fzf python3 python3-pip python3-venv pipewire pipewire-audio alsa-utils kitty sox) ;;
-  dnf) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv pipewire-utils alsa-utils kitty sox) ;;
-  brew) packages=(git tmux neovim fish fzf python kitty sox) ;;
-  pacman) packages=(git tmux neovim fish fzf python python-pip pipewire pipewire-audio alsa-utils kitty sox) ;;
-  zypper) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv pipewire alsa-utils kitty sox) ;;
+  apt-get) packages=(git tmux neovim fish fzf python3 python3-pip python3-venv cargo pipewire pipewire-audio alsa-utils kitty sox) ;;
+  dnf) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pipewire-utils alsa-utils kitty sox) ;;
+  brew) packages=(git tmux neovim fish fzf python rust kitty sox) ;;
+  pacman) packages=(git tmux neovim fish fzf python python-pip rust pipewire pipewire-audio alsa-utils kitty sox) ;;
+  zypper) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pipewire alsa-utils kitty sox) ;;
 esac
 echo "   installing supported host dependencies with $manager: ${missing[*]}"
 if [[ "$manager" == brew ]]; then
