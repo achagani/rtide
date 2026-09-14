@@ -179,6 +179,12 @@ for package in atk-devel gtk3-devel webkit2gtk4.1-devel; do
   grep -F "$package" "$ROOT/scripts/install-deps" >/dev/null \
     || fail "dependency installer does not provision Fedora TWeb package: $package"
 done
+grep -F 'pkg-config --exists' "$ROOT/scripts/install-deps" >/dev/null \
+  || fail 'dependency installer does not validate native TWeb pkg-config capabilities'
+for capability in atk gtk+-3.0 pango webkit2gtk-4.1; do
+  grep -F "$capability" "$ROOT/scripts/install-deps" >/dev/null \
+    || fail "dependency installer does not validate TWeb capability: $capability"
+done
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null

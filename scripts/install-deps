@@ -3,7 +3,7 @@
 set -euo pipefail
 
 missing=()
-for command in git tmux nvim fish fzf python3 cargo; do
+for command in git tmux nvim fish fzf python3 cargo pkg-config; do
   command -v "$command" >/dev/null 2>&1 || missing+=("$command")
 done
 if ! command -v kitty >/dev/null 2>&1 && ! command -v ghostty >/dev/null 2>&1; then
@@ -11,6 +11,15 @@ if ! command -v kitty >/dev/null 2>&1 && ! command -v ghostty >/dev/null 2>&1; t
 fi
 if ! command -v pw-record >/dev/null 2>&1 && ! command -v arecord >/dev/null 2>&1 && ! command -v rec >/dev/null 2>&1; then
   missing+=(audio-recorder)
+fi
+
+# TWeb's Linux build needs the development metadata, not just the pkg-config
+# executable. A previous early exit treated pkg-config as sufficient and let
+# the later Cargo build fail with missing pango/atk/GTK libraries.
+if [[ "$(uname -s)" == Linux ]] && command -v pkg-config >/dev/null 2>&1; then
+  for capability in atk gtk+-3.0 pango webkit2gtk-4.1; do
+    pkg-config --exists "$capability" || missing+=("pkgconfig:$capability")
+  done
 fi
 if [[ ${#missing[@]} -eq 0 ]]; then
   echo '   supported host dependencies already present'

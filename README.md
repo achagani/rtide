@@ -109,7 +109,9 @@ When `tweb` is missing, the default installer clones
 `https://github.com/keyolk/tweb.git` into `~/.local/src/tweb` and runs its
 supported `make install` target under `~/.local`; the default host package set
 also installs Cargo/Rust and the GTK/ATK/WebKit development libraries because
-TWeb builds a Rust workspace against those native libraries. Override the source or paths
+TWeb builds a Rust workspace against those native libraries. On Linux, the installer
+also verifies the corresponding `pkg-config` metadata before it considers the host ready.
+Override the source or paths
 with `RTIDE_TWEB_SOURCE_URL`, `RTIDE_TWEB_SOURCE_DIR`, and `RTIDE_TWEB_PREFIX`.
 Agent CLIs/authentication remain explicit because RTIDE cannot safely choose an
 agent or log it in for you. Run `rtide doctor` after bootstrap for the exact
