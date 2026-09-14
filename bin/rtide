@@ -1926,6 +1926,21 @@ while (( SECONDS < READY_DEADLINE )); do
   sleep 0.1
 done
 
+# Finish the pane geometry before exposing the agent prompt. Resizing after the
+# prompt becomes usable can leave Electron holding a stale paint buffer, which
+# TWeb correctly refuses to display at the new dimensions.
+tweb eval --pane "$TWEB_PANE" \
+  "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; true" >/dev/null 2>&1 || true
+tmux resize-window -t "$S:work" -x "$START_W" -y "$START_H" 2>/dev/null || true
+tmux resize-pane -t "$AGENT_PANE" -y "$agent_lines"
+TWEB_W=$(( START_W * tweb_pct / 100 ))
+(( TWEB_W < 10 )) && TWEB_W=10
+tmux resize-pane -t "$TWEB_PANE" -x "$TWEB_W"
+# A reload requests a fresh paint at the final pane dimensions after the
+# launch-time resize, avoiding a stale frame-size race in the Electron engine.
+tweb reload --pane "$TWEB_PANE" >/dev/null 2>&1 || true
+sleep 0.5
+
 # Only now start the agent prompt. It may still take a moment to initialize,
 # but any submitted request has a connected TWeb destination by construction.
 tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
@@ -1942,17 +1957,6 @@ while (( SECONDS < READY_DEADLINE )); do
   sleep 0.1
 done
 
-# Match subsequent tweb-render navigations: one content-size notch below the
-# browser default while leaving tweb's device/pixel scaling untouched.
-tweb eval --pane "$TWEB_PANE" \
-  "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; true" >/dev/null 2>&1 || true
-
-# Reassert the exact configured layout at the real client dimensions.
-tmux resize-window -t "$S:work" -x "$START_W" -y "$START_H" 2>/dev/null || true
-tmux resize-pane -t "$AGENT_PANE" -y "$agent_lines"
-TWEB_W=$(( START_W * tweb_pct / 100 ))
-(( TWEB_W < 10 )) && TWEB_W=10
-tmux resize-pane -t "$TWEB_PANE" -x "$TWEB_W"
 if ! (( READY_NVIM && READY_TWEB && READY_AGENT )); then
   printf 'warning: workspace opened before all surfaces became ready (nvim=%s tweb=%s agent=%s)\n' \
     "$READY_NVIM" "$READY_TWEB" "$READY_AGENT" >&2
