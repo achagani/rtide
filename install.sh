@@ -2,17 +2,20 @@
 # Bootstrap or update the RTIDE source checkout, then install an immutable release.
 set -euo pipefail
 
-WITH_DEPS=0
-WITH_LAZYVIM=0
-WITH_VOICE=0
+WITH_DEPS=1
+WITH_LAZYVIM=1
+WITH_VOICE=1
 for arg in "$@"; do
   case "$arg" in
     --with-deps) WITH_DEPS=1 ;;
     --with-lazyvim) WITH_LAZYVIM=1 ;;
     --with-voice) WITH_VOICE=1 ;;
+    --without-deps) WITH_DEPS=0 ;;
+    --without-lazyvim) WITH_LAZYVIM=0 ;;
+    --without-voice) WITH_VOICE=0 ;;
     -h|--help)
-      printf 'Usage: install.sh [--with-deps] [--with-lazyvim] [--with-voice]\n\n'
-      printf '%s\n' 'Installs RTIDE. --with-deps installs supported host packages; --with-lazyvim bootstraps LazyVim only when ~/.config/nvim is absent; --with-voice prewarms the local speech environment.'
+      printf 'Usage: install.sh [--without-deps] [--without-lazyvim] [--without-voice]\n\n'
+      printf '%s\n' 'Installs RTIDE and provisions supported dependencies by default. Opt out explicitly with --without-deps, --without-lazyvim, or --without-voice.'
       exit 0
       ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -62,6 +65,12 @@ if (( WITH_VOICE )); then
   "$REPO_DIR/scripts/install-voice"
 fi
 
+if ! "$REPO_DIR/bin/rtide" doctor; then
+  echo 'RTIDE installation stopped: required dependencies are missing.' >&2
+  echo 'Install the reported external requirements, then rerun install.sh.' >&2
+  exit 1
+fi
+
 make -C "$REPO_DIR" install
 
 mkdir -p "$RUNTIME_DIR/memory"
@@ -70,6 +79,7 @@ if [[ ! -f "$RUNTIME_DIR/config" ]]; then
 fi
 
 BIN_DIR="$HOME/.local/bin"
+export PATH="$BIN_DIR:$PATH"
 case ":$PATH:" in
   *":$BIN_DIR:"*) : ;;
   *) echo "   WARN: add $BIN_DIR to PATH" ;;
@@ -93,6 +103,6 @@ rtide --version
 if (( WITH_DEPS || WITH_LAZYVIM || WITH_VOICE )); then
   echo
   echo 'Dependency check:'
-  rtide doctor || true
+  rtide doctor
 fi
 echo "Installed. Run: rtide"

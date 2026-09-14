@@ -276,14 +276,16 @@ cmd_doctor() {
   if [[ -x "$speech_python" ]] && "$speech_python" -c 'import faster_whisper' >/dev/null 2>&1; then
     echo 'speech engine: faster-whisper ready'
   else
-    echo 'INFO: speech engine not prepared; run install.sh --with-voice or use voice once'
+    echo 'MISSING: speech engine faster-whisper; rerun install.sh or use --without-voice'; ok=0
   fi
   echo 'editor:'
   nvim_config="${RTIDE_NVIM_CONFIG_DIR:-$HOME/.config/nvim}"
   if [[ -f "$nvim_config/lua/config/lazy.lua" ]] && grep -Rqs 'LazyVim/LazyVim' "$nvim_config"; then
     echo 'editor config: LazyVim'
+  elif [[ -d "$nvim_config" ]] && [[ -n "$(find "$nvim_config" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+    echo 'editor config: existing custom Neovim config'
   else
-    echo 'INFO: LazyVim not detected; run install.sh --with-lazyvim when desired'
+    echo 'MISSING: LazyVim config; rerun install.sh or use --without-lazyvim'; ok=0
   fi
   echo 'terminal:'
   command -v kitty >/dev/null 2>&1 && echo 'terminal: kitty'

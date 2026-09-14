@@ -81,10 +81,10 @@ speak, press Enter to stop, and the transcript is inserted at the cursor.
 curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash
 # or, without hosting:
 git clone https://github.com/achagani/rtide ~/rtide && ~/rtide/install.sh
-# optionally install supported host packages first:
+# supported host packages are installed by default; this is an explicit equivalent:
 curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash -s -- --with-deps
-# optionally bootstrap an empty Neovim config with LazyVim and prewarm voice:
-curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash -s -- --with-deps --with-lazyvim --with-voice
+# opt out only when intentionally keeping a custom setup:
+curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash -s -- --without-lazyvim --without-voice
 ```
 
 The installer builds and tests the source, copies an immutable release under
@@ -98,10 +98,11 @@ contents is safe; changed contents require a version bump.
 `arecord`, or `rec`, plus local `faster-whisper`), editor configuration
 (optional LazyVim), and agents (claude, codex, hermes, or opencode). `--with-deps`
 installs the portable host packages for these categories through the first
-available package manager (`apt-get`, `dnf`, `brew`, `pacman`, or `zypper`).
-`--with-lazyvim` bootstraps LazyVim only when the configured Neovim directory is
-absent or empty. `--with-voice` prepares `~/.rtide/speech-env` without modifying
-system Python.
+available package manager (`apt-get`, `dnf`, `brew`, `pacman`, or `zypper`). By
+default, `install.sh` also bootstraps LazyVim only when the configured Neovim
+directory is absent or empty, and prepares `~/.rtide/speech-env` without
+modifying system Python. Use `--without-lazyvim`, `--without-voice`, or
+`--without-deps` only to keep an intentional custom setup.
 
 TWeb and agent CLIs/authentication remain explicit external installs: TWeb is a
 separately distributed terminal browser runtime, and RTIDE cannot safely choose

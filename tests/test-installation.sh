@@ -158,10 +158,13 @@ grep -F -- '--with-lazyvim' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not expose LazyVim bootstrap'
 grep -F -- '--with-voice' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not expose voice bootstrap'
-grep -F 'LazyVim not detected' "$ROOT/bin/rtide" >/dev/null \
+grep -F 'LazyVim config' "$ROOT/bin/rtide" >/dev/null \
   || fail 'doctor does not report LazyVim state'
 grep -F 'speech engine not prepared' "$ROOT/bin/rtide" >/dev/null \
+  || grep -F 'speech engine faster-whisper' "$ROOT/bin/rtide" >/dev/null \
   || fail 'doctor does not report voice state'
+grep -F -- '--without-deps' "$ROOT/install.sh" >/dev/null \
+  || fail 'installer does not expose dependency opt-out'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
