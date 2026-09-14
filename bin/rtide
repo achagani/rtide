@@ -1911,24 +1911,34 @@ open(out, "w").write(html)
 PY
 tmux send-keys -t "$TWEB_PANE" "tweb open file://$DIR/.tweb/welcome.html" Enter
 find "$DIR/.rtide/agent-ready" -maxdepth 0 -type f -delete 2>/dev/null || true
-tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
 
-# Readiness barrier: wait for concrete signals from all three surfaces, then
-# make one final geometry/focus pass after asynchronous startup has settled.
+# TWeb must be connected before the agent accepts a request. Otherwise the
+# first response can finish while the browser is still registering with twebd,
+# leaving the user with a successful-looking turn and no visible output.
 printf 'starting %s…\n' "$S"
-READY_NVIM=0 READY_TWEB=0 READY_AGENT=0
+READY_NVIM=0 READY_TWEB=0
 READY_DEADLINE=$((SECONDS + 15))
 while (( SECONDS < READY_DEADLINE )); do
   [[ -S "$DIR/.rtide/nvim.sock" ]] && READY_NVIM=1
   tweb status --pane "$TWEB_PANE" 2>/dev/null \
     | grep -Fq "file://$DIR/.tweb/welcome.html" && READY_TWEB=1 || true
+  (( READY_NVIM && READY_TWEB )) && break
+  sleep 0.1
+done
+
+# Only now start the agent prompt. It may still take a moment to initialize,
+# but any submitted request has a connected TWeb destination by construction.
+tmux send-keys -t "$AGENT_PANE" "$AGENT_CMD" Enter
+READY_AGENT=0
+READY_DEADLINE=$((SECONDS + 15))
+while (( SECONDS < READY_DEADLINE )); do
   if [[ -f "$DIR/.rtide/agent-ready" ]]; then
     READY_AGENT=1
   else
     tmux capture-pane -p -t "$AGENT_PANE" -S -10 2>/dev/null \
       | grep -Fq '● ready' && READY_AGENT=1 || true
   fi
-  (( READY_NVIM && READY_TWEB && READY_AGENT )) && break
+  (( READY_AGENT )) && break
   sleep 0.1
 done
 

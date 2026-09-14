@@ -278,7 +278,10 @@ def current_tweb_url(pane):
 def show_and_verify(target, source_path=None):
     """Load target and verify tweb actually reports it, retrying if needed."""
     pane = managed_tweb_pane()
-    for _ in range(3):
+    # Electron startup and the twebd registration handshake can take several
+    # seconds on a cold cache. Keep retrying long enough that the first agent
+    # response is not reported as missing merely because the pane is settling.
+    for _ in range(30):
         if source_path:
             subprocess.run([TWEB_RENDER, source_path], capture_output=True)
         else:
@@ -287,7 +290,7 @@ def show_and_verify(target, source_path=None):
             subprocess.run([TWEB_RENDER, "--url", target], capture_output=True)
         if current_tweb_url(pane) == target:
             return True
-        time.sleep(0.15)
+        time.sleep(0.25)
     return False
 
 

@@ -185,6 +185,10 @@ for capability in atk gtk+-3.0 pango webkit2gtk-4.1; do
   grep -F "$capability" "$ROOT/scripts/install-deps" >/dev/null \
     || fail "dependency installer does not validate TWeb capability: $capability"
 done
+grep -F 'TWeb must be connected before the agent accepts a request' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'launcher does not gate the agent on TWeb readiness'
+grep -F 'for _ in range(30)' "$ROOT/libexec/rtide/agent" >/dev/null \
+  || fail 'agent render verification does not tolerate slow TWeb startup'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
