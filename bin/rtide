@@ -926,7 +926,7 @@ cmd_menu() {
     "Switch workspace" r "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD switch'" \
     "Change agent…"    m "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 70% '$RTIDE_CMD agent'" \
     "New workspace…"   n "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD new'" \
-    "Fork conversation…" f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 35% 'sh -c \"read -p \\\"Fork name (empty = automatic): \\\" n; $RTIDE_CMD fork ${sess} ${window} \\\"\\\$n\\\"; echo; read -p done\"'" \
+    "Fork conversation…" f "run-shell '$RTIDE_CMD fork-popup ${sess} ${window} #{client_name}'" \
     "" \
     "- LAYOUT & VIEW"   "" "" \
     "Refresh layout"   R "run-shell '$RTIDE_CMD refresh-window ${window}'" \
@@ -1092,6 +1092,49 @@ cmd_voice_popup() {
   exit 0
 }
 
+cmd_fork_popup() {
+  local sess="${2:-}" window="${3:-}" client="${4:-}"
+  local width height popup_w popup_h
+  [[ -n "$sess" && -n "$window" ]] || { echo "fork-popup: missing workspace target" >&2; exit 1; }
+
+  # tmux popups belong to an attached client, not to one of the window's
+  # individual panes. Target the client that opened the menu and derive an
+  # explicit cell size from its viewport so short terminals still have enough
+  # rows for the prompt plus success or error output.
+  if [[ -n "$client" ]]; then
+    width=$(tmux display-message -p -c "$client" '#{client_width}' 2>/dev/null || true)
+    height=$(tmux display-message -p -c "$client" '#{client_height}' 2>/dev/null || true)
+  fi
+  [[ "${width:-}" =~ ^[0-9]+$ ]] || width=$(tmux display-message -p -t "$window" '#{window_width}' 2>/dev/null || true)
+  [[ "${height:-}" =~ ^[0-9]+$ ]] || height=$(tmux display-message -p -t "$window" '#{window_height}' 2>/dev/null || true)
+  [[ "$width" =~ ^[0-9]+$ ]] || width="${COLUMNS:-80}"
+  [[ "$height" =~ ^[0-9]+$ ]] || height="${LINES:-24}"
+  [[ "$width" =~ ^[0-9]+$ ]] || width=80
+  [[ "$height" =~ ^[0-9]+$ ]] || height=24
+
+  popup_w=$(( width - 4 ))
+  (( popup_w > 72 )) && popup_w=72
+  (( popup_w < 24 )) && popup_w=24
+  (( popup_w > width )) && popup_w="$width"
+  popup_h=$(( height - 4 ))
+  (( popup_h > 12 )) && popup_h=12
+  (( popup_h < 7 )) && popup_h=7
+  (( popup_h > height )) && popup_h="$height"
+
+  if [[ "${RTIDE_POPUP_PRINT_SIZE:-0}" == 1 ]]; then
+    printf '%sx%s\n' "$popup_w" "$popup_h"
+    exit 0
+  fi
+
+  local -a client_args=()
+  [[ -z "$client" ]] || client_args=(-t "$client")
+  tmux display-popup "${client_args[@]}" -E -b rounded \
+    -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
+    -x C -y C -w "$popup_w" -h "$popup_h" \
+    "sh -c 'printf \"Fork name (empty = automatic): \"; IFS= read -r n; $RTIDE_CMD fork \"$sess\" \"$window\" \"\$n\"; rc=\$?; printf \"\\n\"; if [ \$rc -ne 0 ]; then read -r -p \"press Enter to close\"; fi; exit \$rc'"
+  exit 0
+}
+
 cmd_pane_popup() {
   local client="${2:-}" helper="$HOME/.tmux/pane-popup-toggle.sh"
   local active pane role window line
@@ -1205,6 +1248,7 @@ case "${1:-}" in
   menu)   cmd_menu "$@" ;;
   history) cmd_history "$@" ;;
   pdf)    cmd_pdf "$@" ;;
+  fork-popup) cmd_fork_popup "$@" ;;
   voice-popup) cmd_voice_popup "$@" ;;
   pane-popup) cmd_pane_popup "$@" ;;
   slash-menu) cmd_slash_menu "$@" ;;

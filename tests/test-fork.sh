@@ -73,6 +73,21 @@ if HOME="$TEST_TMP/home" RTIDE_FORK_NO_LAUNCH=1 \
   fail 'duplicate fork name unexpectedly succeeded'
 fi
 
+# The action-menu popup targets its invoking client and uses bounded cell
+# dimensions instead of a percentage that can become too short to show output.
+grep -F 'run-shell '\''$RTIDE_CMD fork-popup ${sess} ${window} #{client_name}' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'fork menu does not route through the adaptive popup helper'
+grep -F 'popup_w > 72' "$ROOT/bin/rtide" >/dev/null || fail 'fork popup width is not bounded'
+grep -F 'popup_h > 12' "$ROOT/bin/rtide" >/dev/null || fail 'fork popup height is not bounded'
+grep -F 'popup_h < 7' "$ROOT/bin/rtide" >/dev/null || fail 'fork popup lacks a readable minimum height'
+if grep 'Fork conversation' "$ROOT/bin/rtide" | grep -F -- '-w 80% -h 35%' >/dev/null; then
+  fail 'fork menu still uses fixed percentage popup dimensions'
+fi
+[[ "$(RTIDE_POPUP_PRINT_SIZE=1 "$ROOT/bin/rtide" fork-popup demo @1 missing-client)" == 72x12 ]] \
+  || fail 'fork popup normal viewport bounds are wrong'
+[[ "$(COLUMNS=40 LINES=10 RTIDE_POPUP_PRINT_SIZE=1 "$ROOT/bin/rtide" fork-popup demo @1 missing-client)" == 36x7 ]] \
+  || fail 'fork popup fallback viewport bounds are wrong'
+
 # Forking an existing fork must create a sibling worktree from the primary
 # repository, never a nested .rtide-worktrees directory.
 SECOND_WINDOW=$(tmux new-window -d -P -F '#{window_id}' -t "$SESSION:" -n existing-fork -c "$FORK")
@@ -85,4 +100,4 @@ HOME="$TEST_TMP/home" RTIDE_FORK_NO_LAUNCH=1 \
 [[ "$(git -C "$TEST_TMP/.rtide-worktrees/test-fork-2" branch --show-current)" == rtide/fork-2 ]] \
   || fail 'fork-of-fork branch numbering is wrong'
 
-printf 'PASS: isolated worktrees, fork-of-fork, changes, artifacts, history, and context\n'
+printf 'PASS: adaptive popup, isolated worktrees, fork-of-fork, changes, artifacts, history, and context\n'
