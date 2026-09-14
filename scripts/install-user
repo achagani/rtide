@@ -61,6 +61,8 @@ mkdir -p "$HOME/.rtide/memory"
 
 # The launcher remains independent of the selected release so rollback still
 # works when an active payload is broken. Replace it atomically.
+python3 "$ROOT/scripts/install-tmux"
+
 launcher_tmp="$BIN_DIR/.rtide.$$"
 cp "$ROOT/scripts/rtide-launcher" "$launcher_tmp"
 chmod 755 "$launcher_tmp"

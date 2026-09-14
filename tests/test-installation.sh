@@ -222,6 +222,8 @@ ln -s "$RTIDE_INSTALL_ROOT/current/bin/rtide-open" "$RTIDE_BIN_DIR/rtide-open"
 printf 'user owned\n' > "$RTIDE_BIN_DIR/tweb-run"
 FIRST=$(make_payload 0.1.1)
 bash "$ROOT/scripts/install-user" "$FIRST" >/dev/null
+grep -Fx 'set-option -g allow-passthrough all' "$HOME/.tmux.conf" >/dev/null \
+  || fail 'installation did not enable terminal graphics passthrough'
 [[ -f "$HOME/.rtide/memory/.index-v2/index.json" ]] \
   || fail 'installation did not create the additive global memory index'
 [[ ! -L "$RTIDE_BIN_DIR/rtide" && -x "$RTIDE_BIN_DIR/rtide" ]] || fail 'stable launcher was not installed'

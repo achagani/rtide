@@ -93,6 +93,13 @@ The installer builds and tests the source, copies an immutable release under
 configuration and memory remain under `~/.rtide/`. Re-running the same version and
 contents is safe; changed contents require a version bump.
 
+Installation also adds a managed `allow-passthrough all` block to your existing
+tmux configuration (or creates `~/.tmux.conf`). This lets TWeb send graphics
+through tmux to Kitty/Ghostty. Existing settings are preserved and the original
+file is backed up as `<config>.rtide-backup`. RTIDE also enables passthrough for
+its session on launch, resume, and fork, including with custom tmux configs or
+package-manager installs. Package staging itself never edits user configuration.
+
 **Dependencies** (checked by `rtide doctor`) are grouped into core (`tweb`,
 `tmux` ≥ 3.3, `nvim`), terminal (`kitty` or `ghostty`), voice (`pw-record`,
 `arecord`, or `rec`, plus local `faster-whisper`), editor configuration

@@ -13,6 +13,7 @@ BASH_SOURCES := install.sh \
 	scripts/rtide-launcher scripts/stage-package scripts/install-deps \
 	scripts/install-voice scripts/install-lazyvim scripts/install-tweb
 PYTHON_SOURCES := libexec/rtide/agent libexec/rtide/dictate \
+ scripts/install-tmux tests/test-install-tmux.py \
 	libexec/rtide/fork-status libexec/rtide/forks libexec/rtide/memory-index \
 	libexec/rtide/progress scripts/bump-version scripts/package-tool \
 	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py \
@@ -29,6 +30,7 @@ check:
 	git diff --check
 
 test: check
+	python3 tests/test-install-tmux.py
 	./tests/test-picker-contract.sh
 	./tests/test-fork-snapshot.sh
 	./tests/test-fork-launch-status.sh

@@ -403,6 +403,7 @@ fork_launch_notice() {
 
 launch_fork_window() {
   local sess="$1" fork_dir="$2" label="$3" initial_prompt="${4:-}" target_client="${5:-}"
+  tmux set-option -t "$sess" allow-passthrough all
   local provider harness model permission_policy agent_lines tweb_pct shell fork_window nvim_pane agent_pane tweb_pane tweb_w width first_page ready marker
   local ready_nvim=0 ready_tweb=0 ready_agent=0 deadline status_file log_file failed
   local running
@@ -900,6 +901,7 @@ install_session_hooks() {
 # should consistently return the user to the main editing surface instead.
 resume_session() {
   local sess="$1" pane
+  tmux set-option -t "$sess" allow-passthrough all
   # RTIDE relies on mouse events for pane focus, border resizing, and tweb.
   # Re-enable it in case the global prefix+m toggle disabled it at runtime.
   tmux set-option -g mouse on 2>/dev/null || true
@@ -1865,6 +1867,7 @@ fi
 # Create the server before applying global options so first-run launches work
 # outside an existing tmux session too.
 tmux new-session -d -x "$START_W" -y "$START_H" -s "$S" -n work -c "$DIR"
+tmux set-option -t "$S" allow-passthrough all
 tmux set-option -g mouse on
 tmux set-option -w -t "$S:work" @rtide-workspace "$DIR"
 tmux set-option -w -t "$S:work" @rtide-window-name work

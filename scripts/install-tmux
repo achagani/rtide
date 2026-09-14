@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Persist the terminal graphics prerequisite without replacing user settings."""
+import os
+from pathlib import Path
+
+BEGIN = "# >>> RTIDE terminal graphics >>>"
+END = "# <<< RTIDE terminal graphics <<<"
+
+
+def configure():
+    home = Path.home()
+    candidates = [home / ".tmux.conf"]
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        candidates.append(Path(xdg) / "tmux/tmux.conf")
+    candidates.append(home / ".config/tmux/tmux.conf")
+    path = next((item for item in candidates if item.is_file()), candidates[0])
+    original = path.read_text() if path.exists() else ""
+    # Refuse malformed managed markers instead of risking unrelated content.
+    lines = original.splitlines(keepends=True)
+    starts = [i for i, line in enumerate(lines) if line.strip() == BEGIN]
+    ends = [i for i, line in enumerate(lines) if line.strip() == END]
+    if starts or ends:
+        if len(starts) != 1 or len(ends) != 1 or starts[0] >= ends[0]:
+            raise SystemExit(f"Invalid RTIDE graphics block in {path}; repair its markers first")
+        lines = lines[:starts[0]] + lines[ends[0] + 1:]
+    content = "".join(lines)
+    if content and not content.endswith("\n"):
+        content += "\n"
+    content += f"{BEGIN}\n# Required for TWeb images to reach the terminal through tmux.\nset-option -g allow-passthrough all\n{END}\n"
+    if content != original:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep existing symlinks and permissions; retain an exact first backup.
+        if path.exists():
+            backup = path.with_name(path.name + ".rtide-backup")
+            if not backup.exists():
+                with backup.open("xb") as handle:
+                    handle.write(path.read_bytes())
+        path.write_text(content)
+    print(f"tmux graphics configured: {path}")
+
+
+if __name__ == "__main__":
+    configure()
