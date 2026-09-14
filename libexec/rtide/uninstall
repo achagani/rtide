@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Remove RTIDE's managed installation without touching user-owned collisions.
+set -euo pipefail
+
+INSTALL_ROOT="${RTIDE_INSTALL_ROOT:-$HOME/.local/lib/rtide}"
+BIN_DIR="${RTIDE_LAUNCHER_BIN_DIR:-${RTIDE_BIN_DIR:-$HOME/.local/bin}}"
+PURGE=0
+YES=0
+for arg in "$@"; do
+  case "$arg" in
+    --purge) PURGE=1 ;;
+    --yes|-y) YES=1 ;;
+    -h|--help)
+      printf '%s\n' 'Usage: rtide uninstall [--purge] [--yes]' '' '--purge also removes RTIDE global config and memory; project workspaces are preserved.'
+      exit 0
+      ;;
+    *) echo "usage: rtide uninstall [--purge] [--yes]" >&2; exit 2 ;;
+  esac
+done
+
+[[ "$INSTALL_ROOT" != / && "$INSTALL_ROOT" != "$HOME" && -n "$INSTALL_ROOT" ]] || {
+  echo "refusing unsafe install root: $INSTALL_ROOT" >&2; exit 2;
+}
+[[ "$BIN_DIR" != / && "$BIN_DIR" != "$HOME" && -n "$BIN_DIR" ]] || {
+  echo "refusing unsafe bin directory: $BIN_DIR" >&2; exit 2;
+}
+
+if (( ! YES )); then
+  echo "This removes RTIDE releases from $INSTALL_ROOT and the RTIDE launcher from $BIN_DIR."
+  (( PURGE )) && echo "It also removes $HOME/.rtide/config and $HOME/.rtide/memory."
+  read -r -p 'Continue? [y/N] ' answer
+  [[ "$answer" =~ ^[yY]([eE][sS])?$ ]] || { echo 'uninstall cancelled'; exit 0; }
+fi
+
+launcher="$BIN_DIR/rtide"
+if [[ -f "$launcher" && ! -L "$launcher" ]] && grep -Fq '# Stable per-user RTIDE launcher' "$launcher"; then
+  rm -f -- "$launcher"
+  echo "removed $launcher"
+fi
+
+if [[ -d "$BIN_DIR" ]]; then
+  for path in "$BIN_DIR"/*; do
+    [[ -L "$path" ]] || continue
+    target=$(readlink "$path")
+    if [[ "$target" == /* ]]; then resolved=$(realpath -m "$target"); else resolved=$(realpath -m "$(dirname "$path")/$target"); fi
+    case "$resolved" in "$INSTALL_ROOT"/*) rm -f -- "$path"; echo "removed $path" ;; esac
+  done
+fi
+
+if [[ -d "$INSTALL_ROOT" ]]; then
+  rm -rf -- "$INSTALL_ROOT"
+  echo "removed $INSTALL_ROOT"
+fi
+
+if (( PURGE )); then
+  rm -rf -- "$HOME/.rtide/config" "$HOME/.rtide/memory"
+  rmdir "$HOME/.rtide" 2>/dev/null || true
+  echo "removed RTIDE global config and memory"
+fi
+echo 'RTIDE uninstalled; project workspaces and source checkouts were preserved.'

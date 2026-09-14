@@ -81,6 +81,10 @@ speak, press Enter to stop, and the transcript is inserted at the cursor.
 curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash
 # or, without hosting:
 git clone https://github.com/achagani/rtide ~/rtide && ~/rtide/install.sh
+# optionally install supported host packages first:
+curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash -s -- --with-deps
+# optionally bootstrap an empty Neovim config with LazyVim and prewarm voice:
+curl -fsSL https://raw.githubusercontent.com/achagani/rtide/main/install.sh | bash -s -- --with-deps --with-lazyvim --with-voice
 ```
 
 The installer builds and tests the source, copies an immutable release under
@@ -89,9 +93,24 @@ The installer builds and tests the source, copies an immutable release under
 configuration and memory remain under `~/.rtide/`. Re-running the same version and
 contents is safe; changed contents require a version bump.
 
-**Dependencies** (checked by `rtide doctor`): `tweb`, `tmux` ≥ 3.3, `nvim`, a
-terminal (`kitty` or `ghostty`), and at least one agent. The default shell **fish**
-is auto-installed with `--with-deps` (apt/brew); zsh is the fallback.
+**Dependencies** (checked by `rtide doctor`) are grouped into core (`tweb`,
+`tmux` ≥ 3.3, `nvim`), terminal (`kitty` or `ghostty`), voice (`pw-record`,
+`arecord`, or `rec`, plus local `faster-whisper`), editor configuration
+(optional LazyVim), and agents (claude, codex, hermes, or opencode). `--with-deps`
+installs the portable host packages for these categories through the first
+available package manager (`apt-get`, `dnf`, `brew`, `pacman`, or `zypper`).
+`--with-lazyvim` bootstraps LazyVim only when the configured Neovim directory is
+absent or empty. `--with-voice` prepares `~/.rtide/speech-env` without modifying
+system Python.
+
+TWeb and agent CLIs/authentication remain explicit external installs: TWeb is a
+separately distributed terminal browser runtime, and RTIDE cannot safely choose
+an agent or log it in for you. Run `rtide doctor` after bootstrap for the exact
+remaining checks.
+
+To remove RTIDE later, run `rtide uninstall`. Add `--purge` to also remove the
+global RTIDE config and memory under `~/.rtide`; project workspaces and source
+checkouts are preserved. `--yes` skips the confirmation prompt for automation.
 
 ## Provider & harness selection
 

@@ -3,6 +3,8 @@
 set -euo pipefail
 
 INSTALL_ROOT="${RTIDE_INSTALL_ROOT:-$HOME/.local/lib/rtide}"
+USER_BIN_DIR="${RTIDE_BIN_DIR:-$HOME/.local/bin}"
+export RTIDE_LAUNCHER_BIN_DIR="$USER_BIN_DIR"
 VERSIONS_DIR="$INSTALL_ROOT/versions"
 CURRENT="$INSTALL_ROOT/current"
 

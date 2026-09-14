@@ -154,6 +154,14 @@ grep -F 'request-restore "$client"' <<< "$pane_popup_source" >/dev/null \
   || fail 'RTIDE does not pass the nested popup client to targeted restore'
 grep -F 'failed readiness' <<< "$launch_source" >/dev/null \
   || fail 'fork readiness status does not record the failed stage'
+grep -F -- '--with-lazyvim' "$ROOT/install.sh" >/dev/null \
+  || fail 'installer does not expose LazyVim bootstrap'
+grep -F -- '--with-voice' "$ROOT/install.sh" >/dev/null \
+  || fail 'installer does not expose voice bootstrap'
+grep -F 'LazyVim not detected' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'doctor does not report LazyVim state'
+grep -F 'speech engine not prepared' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'doctor does not report voice state'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
@@ -161,6 +169,7 @@ BASE="$TEST_TMP/build/rtide-$(tr -d '[:space:]' < "$ROOT/VERSION")"
 [[ -f "$BASE/share/assets/rtide-mark.png" ]] || fail 'release payload omitted the RTIDE logo'
 [[ -x "$BASE/libexec/rtide/forks" && -x "$BASE/libexec/rtide/memory-index" ]] \
   || fail 'release payload omitted fork manager helpers'
+[[ -x "$BASE/libexec/rtide/uninstall" ]] || fail 'release payload omitted uninstall helper'
 [[ -x "$BASE/libexec/rtide/picker.sh" ]] || fail 'release payload omitted the shared picker helper'
 [[ -x "$BASE/libexec/rtide/progress" ]] || fail 'release payload omitted implementation dashboard helper'
 [[ -x "$BASE/libexec/rtide/pane-popup" ]] || fail 'release payload omitted pane popup helper'
@@ -249,4 +258,33 @@ HOME="$TEST_TMP/package-home" "$STAGE/usr/lib/rtide/bin/rtide" --version \
   | grep -Fx 'rtide 0.1.1' >/dev/null || fail 'staged payload is not relocatable'
 [[ ! -e "$TEST_TMP/package-home" ]] || fail 'package staging modified user state'
 
+# Exercise the public installed dispatch as well as the source helper.
+printf 'keep me\n' > "$RTIDE_BIN_DIR/unrelated"
+mkdir -p "$HOME/project/.rtide"
+printf 'keep project\n' > "$HOME/project/.rtide/agent"
+rtide uninstall --purge --yes >/dev/null
+[[ ! -e "$RTIDE_INSTALL_ROOT" && ! -e "$RTIDE_BIN_DIR/rtide" ]] || fail 'public uninstall left managed state behind'
+[[ -f "$RTIDE_BIN_DIR/unrelated" && -f "$HOME/project/.rtide/agent" ]] \
+  || fail 'public uninstall removed unrelated or project state'
+
 printf 'PASS: immutable install, collision safety, rollback, retention, and package staging\n'
+
+# The installed command removes only RTIDE-managed state; user-owned files and
+# project workspaces remain intact.  Use a separate HOME so this cannot affect
+# the rest of the installation fixture.
+UNINSTALL_HOME="$TEST_TMP/uninstall-home"
+UNINSTALL_BIN="$UNINSTALL_HOME/.local/bin"
+UNINSTALL_ROOT="$UNINSTALL_HOME/.local/lib/rtide"
+mkdir -p "$UNINSTALL_BIN" "$UNINSTALL_ROOT/versions/0.2.33" "$UNINSTALL_HOME/.rtide/memory" "$UNINSTALL_HOME/project/.rtide"
+cp "$ROOT/VERSION" "$UNINSTALL_ROOT/versions/0.2.33/VERSION"
+ln -s versions/0.2.33 "$UNINSTALL_ROOT/current"
+cp "$ROOT/scripts/rtide-launcher" "$UNINSTALL_BIN/rtide"
+printf 'keep me\n' > "$UNINSTALL_BIN/other-file"
+printf 'keep project\n' > "$UNINSTALL_HOME/project/.rtide/agent"
+HOME="$UNINSTALL_HOME" RTIDE_INSTALL_ROOT="$UNINSTALL_ROOT" RTIDE_BIN_DIR="$UNINSTALL_BIN" \
+  bash "$ROOT/libexec/rtide/uninstall" --purge --yes >/dev/null
+[[ ! -e "$UNINSTALL_ROOT" && ! -e "$UNINSTALL_BIN/rtide" ]] || fail 'uninstall left managed RTIDE state behind'
+[[ -f "$UNINSTALL_BIN/other-file" ]] || fail 'uninstall removed an unrelated bin file'
+[[ -f "$UNINSTALL_HOME/project/.rtide/agent" ]] || fail 'uninstall removed project workspace state'
+
+printf 'PASS: uninstall preserves unrelated files and project state\n'

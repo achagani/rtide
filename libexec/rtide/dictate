@@ -90,16 +90,18 @@ if importlib.util.find_spec("faster_whisper") is None:
                         "faster-whisper"], check=True)
         os.execv(env_python, [env_python, os.path.realpath(__file__), pane])
     fail("could not load the local speech engine")
-recorder = shutil.which("pw-record") or shutil.which("arecord")
+recorder = shutil.which("pw-record") or shutil.which("arecord") or shutil.which("rec")
 if not recorder:
-    fail("pw-record or arecord is required")
+    fail("pw-record, arecord, or rec is required")
 
 with tempfile.TemporaryDirectory(prefix="rtide-dictate-") as tmp:
     audio = os.path.join(tmp, "speech.wav")
     if os.path.basename(recorder) == "pw-record":
         cmd = [recorder, "--rate", "16000", "--channels", "1", audio]
-    else:
+    elif os.path.basename(recorder) == "arecord":
         cmd = [recorder, "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", audio]
+    else:
+        cmd = [recorder, "-q", "-r", "16000", "-c", "1", "-b", "16", audio]
     print("● Listening · Enter sends · Shift+Enter inserts · Esc cancels")
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             start_new_session=True)

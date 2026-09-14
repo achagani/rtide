@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Bootstrap LazyVim only into an absent or empty user Neovim config directory.
+set -euo pipefail
+
+CONFIG_DIR="${RTIDE_NVIM_CONFIG_DIR:-$HOME/.config/nvim}"
+if [[ -e "$CONFIG_DIR" ]] && [[ -n "$(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+  echo "   LazyVim skipped: existing Neovim config at $CONFIG_DIR"
+  exit 0
+fi
+command -v git >/dev/null 2>&1 || { echo 'LazyVim: git is required' >&2; exit 1; }
+mkdir -p "$(dirname "$CONFIG_DIR")"
+stage=$(mktemp -d "${TMPDIR:-/tmp}/rtide-lazyvim.XXXXXX")
+trap 'rm -rf -- "$stage"' EXIT
+git clone --filter=blob:none https://github.com/LazyVim/starter "$stage/nvim" >/dev/null
+rm -rf -- "$stage/nvim/.git"
+if [[ -e "$CONFIG_DIR" ]]; then rmdir "$CONFIG_DIR"; fi
+mv "$stage/nvim" "$CONFIG_DIR"
+echo "   LazyVim installed at $CONFIG_DIR"

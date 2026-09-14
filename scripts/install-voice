@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Prepare RTIDE's optional local speech environment without touching system Python.
+set -euo pipefail
+
+ENV_DIR="${RTIDE_SPEECH_ENV:-$HOME/.rtide/speech-env}"
+PYTHON="${PYTHON3:-python3}"
+command -v "$PYTHON" >/dev/null 2>&1 || { echo 'voice: python3 is required' >&2; exit 1; }
+[[ -x "$ENV_DIR/bin/python" ]] || "$PYTHON" -m venv "$ENV_DIR"
+"$ENV_DIR/bin/python" -m pip install -q --upgrade pip
+"$ENV_DIR/bin/python" -m pip install -q faster-whisper
+echo "   speech environment ready: $ENV_DIR"

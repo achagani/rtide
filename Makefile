@@ -8,8 +8,10 @@ BASH_SOURCES := install.sh \
 	libexec/rtide/pane-popup libexec/rtide/picker.sh \
 	libexec/rtide/provider libexec/rtide/render libexec/rtide/run \
 	libexec/rtide/tweb-common.sh libexec/rtide/guard-bin/tweb \
+	libexec/rtide/uninstall \
 	scripts/check-version-bump scripts/install-user scripts/rtide-dev \
-	scripts/rtide-launcher scripts/stage-package
+	scripts/rtide-launcher scripts/stage-package scripts/install-deps \
+	scripts/install-voice scripts/install-lazyvim
 PYTHON_SOURCES := libexec/rtide/agent libexec/rtide/dictate \
 	libexec/rtide/fork-status libexec/rtide/forks libexec/rtide/memory-index \
 	libexec/rtide/progress scripts/bump-version scripts/package-tool \

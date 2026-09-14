@@ -71,7 +71,7 @@ cmd_help() {
 Usage: rtide [command] [arguments]
 
 Workspace:  new, switch, ls, quit, fork, zoom, agent, config, refresh
-Utilities:  open, progress, memory, mcp, render, run
+Utilities:  open, progress, memory, mcp, render, run, uninstall
 System:     setup, doctor, auth, matrix, versions, use, version
 
 Run `rtide <command> --help` for command-specific help.
@@ -255,6 +255,7 @@ cmd_setup() {
 
 cmd_doctor() {
   local ok=1 repo outer
+  echo 'core:'
   for c in tweb tmux nvim; do
     command -v "$c" >/dev/null 2>&1 || { echo "MISSING: $c"; ok=0; }
   done
@@ -264,7 +265,31 @@ cmd_doctor() {
   command -v kitty >/dev/null 2>&1 || command -v ghostty >/dev/null 2>&1 \
     || { echo "MISSING: kitty or ghostty (terminal)"; ok=0; }
   tmux -V 2>/dev/null | grep -qE '3\.[3-9]' || echo "WARN: tmux < 3.3 (tweb requires 3.3+)"
+  echo 'voice:'
+  if command -v pw-record >/dev/null 2>&1 || command -v arecord >/dev/null 2>&1 || command -v rec >/dev/null 2>&1; then
+    echo 'recorder: available'
+  else
+    echo 'MISSING: pw-record, arecord, or rec (voice input)'; ok=0
+  fi
+  command -v python3 >/dev/null 2>&1 || { echo 'MISSING: python3 (voice input)'; ok=0; }
+  speech_python="$HOME/.rtide/speech-env/bin/python"
+  if [[ -x "$speech_python" ]] && "$speech_python" -c 'import faster_whisper' >/dev/null 2>&1; then
+    echo 'speech engine: faster-whisper ready'
+  else
+    echo 'INFO: speech engine not prepared; run install.sh --with-voice or use voice once'
+  fi
+  echo 'editor:'
+  nvim_config="${RTIDE_NVIM_CONFIG_DIR:-$HOME/.config/nvim}"
+  if [[ -f "$nvim_config/lua/config/lazy.lua" ]] && grep -Rqs 'LazyVim/LazyVim' "$nvim_config"; then
+    echo 'editor config: LazyVim'
+  else
+    echo 'INFO: LazyVim not detected; run install.sh --with-lazyvim when desired'
+  fi
+  echo 'terminal:'
+  command -v kitty >/dev/null 2>&1 && echo 'terminal: kitty'
+  command -v ghostty >/dev/null 2>&1 && echo 'terminal: ghostty'
   local found=0
+  echo 'agents:'
   for a in claude codex hermes opencode; do
     command -v "$a" >/dev/null 2>&1 && { echo "agent: $a"; found=1; }
   done
@@ -1681,6 +1706,7 @@ case "${1:-}" in
     [[ $# -eq 0 ]] || shift
     run_helper mcp "$@"
     ;;
+  uninstall) shift; run_helper uninstall "$@" ;;
   render) shift; run_helper render "$@" ;;
   run)
     shift
