@@ -100,6 +100,12 @@ file is backed up as `<config>.rtide-backup`. RTIDE also enables passthrough for
 its session on launch, resume, and fork, including with custom tmux configs or
 package-manager installs. Package staging itself never edits user configuration.
 
+Output pages have **− / + / Auto** zoom controls beside Outputs. Auto matches
+body text to the terminal line height instead of shrinking pages to 90%; resizing
+the window retains that reading size. Manual zoom (50–300%) is remembered per
+workspace in browser storage. Auto restores the calculated size. The optional
+`RTIDE_TWEB_ZOOM` environment value overrides Auto's default calculation.
+
 **Dependencies** (checked by `rtide doctor`) are grouped into core (`tweb`,
 `tmux` ≥ 3.3, `nvim`), terminal (`kitty` or `ghostty`), voice (`pw-record`,
 `arecord`, or `rec`, plus local `faster-whisper`), editor configuration

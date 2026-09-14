@@ -97,16 +97,7 @@ rtide_tweb_show() {
       printf 'tweb output error: navigation failed for pane %s\n' "$RTIDE_TWEB_PANE" >&2
       return 1
     }
-    # One notch below the browser's default content size. Keep this as a page
-    # scale because tweb intentionally owns its Chromium/device zoom factor.
-    local page_zoom="${RTIDE_TWEB_ZOOM:-0.9}"
-    if [[ "$page_zoom" =~ ^(0\.[1-9][0-9]*|1(\.0+)?)$ ]]; then
-      tweb eval --pane "$RTIDE_TWEB_PANE" \
-        "document.documentElement.style.zoom='$page_zoom'; true" >/dev/null || true
-    fi
-    # Persistent navigation is injected outside the artifact's own visual
-    # system. Shadow DOM keeps arbitrary page CSS from restyling the controls.
-    tweb eval --pane "$RTIDE_TWEB_PANE" '(()=>{let h=document.getElementById("rtide-output-nav");if(h)h.remove();h=document.createElement("div");h.id="rtide-output-nav";h.style.cssText="position:fixed;z-index:2147483647;top:12px;right:12px;font:600 12px/1 system-ui,sans-serif";const s=h.attachShadow({mode:"open"});const marker="/.tweb/";const cut=location.href.indexOf(marker);const out=cut>=0?new URL(location.href.slice(0,cut+marker.length)+"history.html").href:new URL("history.html",location.href).href;s.innerHTML=`<style>*{box-sizing:border-box}.bar{display:flex;align-items:center;gap:2px;padding:4px;border:1px solid #ffffff24;border-radius:12px;background:#0b111be8;box-shadow:0 10px 35px #0008;backdrop-filter:blur(14px)}button,a{height:30px;border:0;border-radius:8px;padding:0 10px;background:transparent;color:#d9e5f5;font:600 12px/1 system-ui,sans-serif;display:grid;place-items:center;text-decoration:none;cursor:pointer}button:hover,a:hover{background:#ffffff12;color:#fff}button:focus-visible,a:focus-visible{outline:2px solid #62d7c7;outline-offset:1px}.outputs{color:#62d7c7}</style><nav class="bar" aria-label="RTIDE output navigation"><button id="back" title="Previous page" aria-label="Previous page">←</button><a class="outputs" href="${out}">Outputs</a><button id="forward" title="Next page" aria-label="Next page">→</button></nav>`;s.getElementById("back").onclick=()=>history.back();s.getElementById("forward").onclick=()=>history.forward();document.body.appendChild(h);return true})()' >/dev/null || true
+    rtide_tweb_controls "$RTIDE_TWEB_PANE"
     mkdir -p "$(dirname "$RTIDE_TWEB_LAST_RENDER")"
     printf '%s\n' "$url" > "$RTIDE_TWEB_LAST_RENDER"
     if [[ "$float" == 1 ]]; then
@@ -128,4 +119,13 @@ rtide_tweb_show() {
 rtide_html_escape() {
   sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
       -e 's/"/\&quot;/g' -e "s/'/\&#39;/g"
+}
+
+rtide_tweb_controls() {
+  local pane="$1" rows zoom="${RTIDE_TWEB_ZOOM:-0}" script_dir
+  rows=$(tmux display-message -p -t "$pane" '#{pane_height}' 2>/dev/null || true)
+  [[ "$rows" =~ ^[1-9][0-9]*$ ]] || rows=0
+  [[ "$zoom" =~ ^[0-9]+(\.[0-9]+)?$ ]] || zoom=0
+  script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../share" && pwd)
+  tweb eval --pane "$pane" "window.__rtideOutputOptions={rows:Number('$rows'),zoom:Number('$zoom')}; $(<"$script_dir/output-controls.js")" >/dev/null || true
 }

@@ -35,6 +35,8 @@ TMUX=fake TMUX_PANE=%2 FAKE_SESSION=rtide-alpha FAKE_PANES='%1 nvim\n%2 agent\n%
   "$ROOT/bin/rtide" render "$TEST_TMP/pages/page with spaces.html" || fail 'managed render failed'
 assert_log 'navigate --pane %9'
 assert_log 'rtide-output-nav'
+assert_log 'Automatic readable zoom'
+assert_log 'rtide-output-zoom:'
 assert_log 'cut+marker.length'
 assert_log 'history.html'
 assert_no_log 'open '

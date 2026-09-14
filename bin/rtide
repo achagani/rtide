@@ -32,6 +32,7 @@ RTIDE_LIBEXEC_DIR="$RTIDE_ROOT/libexec/rtide"
 RTIDE_SHARE_DIR="$RTIDE_ROOT/share"
 export RTIDE_ROOT RTIDE_BIN_DIR RTIDE_LIBEXEC_DIR RTIDE_SHARE_DIR
 source "$RTIDE_LIBEXEC_DIR/picker.sh"
+source "$RTIDE_LIBEXEC_DIR/tweb-common.sh"
 PROVIDER_BIN="$RTIDE_LIBEXEC_DIR/provider"
 TWEB_DIR="$RTIDE_ROOT/share"
 RTIDE_MARK="$TWEB_DIR/assets/rtide-mark.png"
@@ -900,12 +901,14 @@ install_session_hooks() {
 # per session, which is often the agent input strip; selecting the workspace
 # should consistently return the user to the main editing surface instead.
 resume_session() {
-  local sess="$1" pane
+  local sess="$1" pane tweb
   tmux set-option -t "$sess" allow-passthrough all
   # RTIDE relies on mouse events for pane focus, border resizing, and tweb.
   # Re-enable it in case the global prefix+m toggle disabled it at runtime.
   tmux set-option -g mouse on 2>/dev/null || true
   install_session_hooks "$sess"
+  tweb=$(tmux list-panes -s -t "$sess" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="tweb"{print $1; exit}')
+  [[ -z "$tweb" ]] || rtide_tweb_controls "$tweb"
   pane=$(tmux list-panes -s -t "$sess" -F '#{pane_id}' -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
   if [[ -n "$pane" ]]; then
     # The editor may live in a non-current window if the user added windows.
@@ -1381,9 +1384,7 @@ cmd_layout_reset() {
     | awk '$2=="tweb"{print $1; exit}')
   if [[ -n "$tweb" ]]; then
     tweb pin --pane "$tweb" >/dev/null 2>&1 || true
-    tweb eval --pane "$tweb" \
-      "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; window.dispatchEvent(new Event('resize')); true" \
-      >/dev/null 2>&1 || true
+    rtide_tweb_controls "$tweb"
   fi
   tmux select-window -t "$target"
   [[ -n "$agent" ]] && tmux select-pane -t "$agent"
@@ -1482,7 +1483,7 @@ cmd_history() {
   page="$dir/.tweb/history.html"
   [[ -f "$page" ]] || { echo "history: no completed outputs yet" >&2; exit 1; }
   tweb navigate --pane "$tweb" "file://$(realpath "$page")"
-  tweb eval --pane "$tweb" "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; true" >/dev/null 2>&1 || true
+  rtide_tweb_controls "$tweb"
   exit 0
 }
 
@@ -1932,8 +1933,6 @@ done
 # Finish the pane geometry before exposing the agent prompt. Resizing after the
 # prompt becomes usable can leave Electron holding a stale paint buffer, which
 # TWeb correctly refuses to display at the new dimensions.
-tweb eval --pane "$TWEB_PANE" \
-  "document.documentElement.style.zoom='${RTIDE_TWEB_ZOOM:-0.9}'; true" >/dev/null 2>&1 || true
 tmux resize-window -t "$S:work" -x "$START_W" -y "$START_H" 2>/dev/null || true
 tmux resize-pane -t "$AGENT_PANE" -y "$agent_lines"
 TWEB_W=$(( START_W * tweb_pct / 100 ))
@@ -1943,6 +1942,7 @@ tmux resize-pane -t "$TWEB_PANE" -x "$TWEB_W"
 # launch-time resize, avoiding a stale frame-size race in the Electron engine.
 tweb reload --pane "$TWEB_PANE" >/dev/null 2>&1 || true
 sleep 0.5
+rtide_tweb_controls "$TWEB_PANE"
 
 # Only now start the agent prompt. It may still take a moment to initialize,
 # but any submitted request has a connected TWeb destination by construction.
