@@ -30,7 +30,7 @@ SAFE_OUTPUT=$(printf '%s' "$OUTPUT" | rtide_html_escape)
 
 {
   echo "<!DOCTYPE html><html><head><meta charset=utf-8><title>run</title>"
-  echo "<style>body{background:#0d1117;color:#e6edf3;font-family:ui-monospace,monospace;padding:2rem;max-width:900px;margin:0 auto}h1{font-size:1.1rem;color:#58a6ff}pre{background:#161b22;padding:1rem;border-radius:8px;overflow-x:auto;white-space:pre-wrap}</style></head><body>"
+  echo '<meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:dark}body{background:#0d1117;color:#e6edf3;font:16px/1.6 ui-monospace,monospace;padding:2rem;max-width:900px;margin:0 auto}h1{font-size:1.1rem;color:#58a6ff}pre{background:#161b22;padding:1rem;border-radius:8px;overflow-x:auto;white-space:pre-wrap;font:inherit}</style></head><body>'
   echo "<h1>\$ ${SAFE_COMMAND}</h1><pre>${SAFE_OUTPUT}</pre>"
   echo "<p style=\"color:${COLOR}\">exit ${RC} · ${DUR}s</p></body></html>"
 } > "$OUT"

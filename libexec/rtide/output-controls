@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Keep the workspace output controls attached across browser navigations."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def run(*args):
+    return subprocess.run(args, capture_output=True, text=True, timeout=5)
+
+
+def valid(value):
+    return value == 'auto' or (type(value) in (int, float) and 0.5 <= value <= 3)
+
+
+def update(pane, workspace):
+    if run('tmux', 'show-options', '-pqv', '-t', pane, '@rtide-output-export').stdout.strip() == '1':
+        return
+    state = workspace / '.rtide/output-zoom.json'
+    try:
+        saved = json.loads(state.read_text())
+        preference = saved.get('preference') if isinstance(saved, dict) else saved
+    except (OSError, ValueError):
+        saved, preference = {}, None
+    rows = run('tmux', 'display-message', '-p', '-t', pane, '#{pane_height}').stdout.strip()
+    options = {'workspace': workspace.as_uri(), 'rows': int(rows) if rows.isdigit() else 0}
+    if valid(preference):
+        options['preference'] = preference
+        options['updated'] = saved.get('updated', 0) if isinstance(saved, dict) else 0
+    try:
+        options['zoom'] = float(os.environ.get('RTIDE_TWEB_ZOOM', '0'))
+    except ValueError:
+        options['zoom'] = 0
+    if not 0.5 <= options['zoom'] <= 3:
+        options['zoom'] = 0
+    script = (ROOT / 'share/output-controls.js').read_text()
+    result = run('tweb', 'eval', '--pane', pane,
+                 'window.__rtideOutputOptions=' + json.dumps(options) + ';' + script)
+    if result.returncode:
+        return
+    try:
+        result_state = json.loads(result.stdout)
+        chosen = result_state['preference']
+    except (ValueError, KeyError, TypeError):
+        return
+    if valid(chosen) and result_state != saved:
+        state.parent.mkdir(parents=True, exist_ok=True)
+        temporary = state.with_suffix(f'.{os.getpid()}.tmp')
+        temporary.write_text(json.dumps({'preference': chosen, 'updated': result_state.get('updated', 0)}) + '\n')
+        temporary.replace(state)
+
+
+def main():
+    mode, pane, directory = sys.argv[1:4]
+    workspace = Path(directory).resolve()
+    if mode == '--once':
+        update(pane, workspace)
+        return
+    expected_pid = sys.argv[4]
+    lock_dir = workspace / '.rtide'
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    owner = lock_dir / f'output-controls-{expected_pid}.owner'
+    identity_token = str(Path(__file__).resolve())
+    owner.write_text(identity_token)
+    with (lock_dir / f'output-controls-{expected_pid}.lock').open('w') as lock:
+        for attempt in range(8):
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if attempt == 7:
+                    return
+                time.sleep(0.5)
+        while True:
+            try:
+                if owner.read_text() != identity_token:
+                    return
+                identity = run('tmux', 'display-message', '-p', '-t', pane,
+                               '#{pane_pid} #{@rtide-role}').stdout.strip()
+                if identity != expected_pid + ' tweb':
+                    return
+                update(pane, workspace)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            time.sleep(1)
+
+
+if __name__ == '__main__':
+    main()

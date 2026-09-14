@@ -122,10 +122,14 @@ rtide_html_escape() {
 }
 
 rtide_tweb_controls() {
-  local pane="$1" rows zoom="${RTIDE_TWEB_ZOOM:-0}" script_dir
-  rows=$(tmux display-message -p -t "$pane" '#{pane_height}' 2>/dev/null || true)
-  [[ "$rows" =~ ^[1-9][0-9]*$ ]] || rows=0
-  [[ "$zoom" =~ ^[0-9]+(\.[0-9]+)?$ ]] || zoom=0
-  script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../share" && pwd)
-  tweb eval --pane "$pane" "window.__rtideOutputOptions={rows:Number('$rows'),zoom:Number('$zoom')}; $(<"$script_dir/output-controls.js")" >/dev/null || true
+  local pane="$1" workspace pid helper command
+  helper="$(dirname -- "${BASH_SOURCE[0]}")/output-controls"
+  workspace=$(tmux display-message -p -t "$pane" '#{@rtide-workspace}' 2>/dev/null || true)
+  [[ -d "$workspace" ]] || workspace="${RTIDE_WORKSPACE:-$PWD}"
+  python3 "$helper" --once "$pane" "$workspace" || true
+  pid=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null || true)
+  if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    printf -v command 'python3 %q --watch %q %q %q' "$helper" "$pane" "$workspace" "$pid"
+    tmux run-shell -b "$command" >/dev/null 2>&1 || true
+  fi
 }

@@ -502,6 +502,7 @@ launch_fork_window() {
     (( ready_nvim && ready_tweb && ready_agent )) && break
     sleep 0.1
   done
+  (( ready_tweb )) && rtide_tweb_controls "$tweb_pane"
   if ! (( ready_nvim && ready_tweb && ready_agent )); then
     failed=""
     (( ready_nvim )) || failed="${failed} nvim"
@@ -1508,7 +1509,10 @@ cmd_pdf() {
     mkdir -p "$dir/exports"
     out="$dir/exports/${name}-$(date +%Y%m%d-%H%M%S).pdf"
   fi
+  tmux set-option -p -t "$tweb" @rtide-output-export 1
+  trap 'tmux set-option -pu -t "$tweb" @rtide-output-export 2>/dev/null || true' EXIT
   tweb navigate --pane "$tweb" "$target" >/dev/null
+  tweb eval --pane "$tweb" 'window.__rtideExporting=true; document.getElementById("rtide-output-nav")?.remove(); true' >/dev/null 2>&1 || true
   # Wait for navigation, web fonts, and responsive layout to settle. Capturing
   # on the first paint can produce a shorter page than the final artifact.
   tweb wait --pane "$tweb" --load >/dev/null 2>&1 || true

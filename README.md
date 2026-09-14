@@ -100,11 +100,17 @@ file is backed up as `<config>.rtide-backup`. RTIDE also enables passthrough for
 its session on launch, resume, and fork, including with custom tmux configs or
 package-manager installs. Package staging itself never edits user configuration.
 
-Output pages have **− / + / Auto** zoom controls beside Outputs. Auto matches
-body text to the terminal line height instead of shrinking pages to 90%; resizing
-the window retains that reading size. Manual zoom (50–300%) is remembered per
-workspace in browser storage. Auto restores the calculated size. The optional
-`RTIDE_TWEB_ZOOM` environment value overrides Auto's default calculation.
+All output paths share **− / + / Auto** controls: welcome, history, response pages,
+custom artifacts, command/stdin output, and implementation dashboards. A controller
+bound to the browser pane restores controls after navigation or reload (within
+about a second), and exits when that pane closes. In the archive viewer, zoom joins
+the existing navigation and scales the content, not the surrounding controls.
+Body text is normalized against a 16px baseline so the same percentage means the
+same reading size across output types. Auto matches this to terminal line height.
+Manual zoom (50–300%) is saved in `.rtide/output-zoom.json` per workspace, with
+browser storage bridging immediate navigations. The optional `RTIDE_TWEB_ZOOM`
+environment value overrides Auto's calculation. PDF export pauses the controller
+and omits interactive controls. Artifact-specific layouts and headings are retained.
 
 **Dependencies** (checked by `rtide doctor`) are grouped into core (`tweb`,
 `tmux` ≥ 3.3, `nvim`), terminal (`kitty` or `ghostty`), voice (`pw-record`,

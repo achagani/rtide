@@ -25,7 +25,7 @@ if [[ "$FILE" == "-" ]]; then
   mkdir -p "$(dirname "$OUT")"
   {
     echo "<!DOCTYPE html><html><head><meta charset=utf-8><title>pipe</title>"
-    echo "<style>body{background:#0d1117;color:#e6edf3;font-family:ui-monospace,monospace;padding:2rem;max-width:900px;margin:0 auto}pre{white-space:pre-wrap}</style></head><body><pre>"
+    echo '<meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:dark}body{background:#0d1117;color:#e6edf3;font:16px/1.6 ui-monospace,monospace;padding:2rem;max-width:900px;margin:0 auto}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}</style></head><body><pre>'
     rtide_html_escape
     echo "</pre></body></html>"
   } > "$OUT"
