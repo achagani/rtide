@@ -14,3 +14,8 @@ dist/
 .rtide/*
 !.rtide/memory/
 !.rtide/memory/**
+
+# Local development clones and test worktrees
+.codex/
+.rtide-worktrees/
+fork-manager-dev/
