@@ -42,6 +42,10 @@ WS_AGENT_FILE=".rtide/agent"   # per-workspace override, relative to the workspa
 SESSION_PREFIX="${RTIDE_SESSION_PREFIX:-rtide-}"
 DEV_MODE="${RTIDE_DEV_MODE:-0}"
 DEV_LABEL="${RTIDE_DEV_LABEL:-DEVELOPMENT}"
+
+# `RTIDE_CONFIG_DIR` is the authoritative override used by development and
+# isolated tests. Keep the global config path stable when invoking the source
+# entry point directly; development still opts into its separate directory.
 printf -v RTIDE_CMD '%q' "$SCRIPT_PATH"
 printf -v RTIDE_AGENT_CMD '%q' "$RTIDE_LIBEXEC_DIR/agent"
 printf -v RTIDE_MEM_CMD '%q' "$RTIDE_LIBEXEC_DIR/memory"
@@ -1829,8 +1833,11 @@ fi
 [[ "$START_H" =~ ^[0-9]+$ ]] || START_H=$(tput lines 2>/dev/null || echo 24)
 [[ "$START_W" =~ ^[0-9]+$ ]] || START_W=80
 [[ "$START_H" =~ ^[0-9]+$ ]] || START_H=24
-tmux set-option -g mouse on
+# A detached `make dev` may be the first RTIDE command in this tmux server.
+# Create the server before applying global options so first-run launches work
+# outside an existing tmux session too.
 tmux new-session -d -x "$START_W" -y "$START_H" -s "$S" -n work -c "$DIR"
+tmux set-option -g mouse on
 tmux set-option -w -t "$S:work" @rtide-workspace "$DIR"
 tmux set-option -w -t "$S:work" @rtide-window-name work
 tmux set-option -w -t "$S:work" automatic-rename off

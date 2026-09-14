@@ -47,6 +47,11 @@ grep -F 'RTIDE_ROOT/docs/assets/rtide-mark.png' "$ROOT/bin/rtide" >/dev/null \
   || fail 'source development asset fallback is missing'
 grep -F 'export RTIDE_DEV_MODE=1' "$ROOT/scripts/rtide-dev" >/dev/null \
   || fail 'development launcher does not enable its visual identity'
+startup_source=$(sed -n '/^# A detached `make dev` may be the first RTIDE command/,/^tmux set-option -w -t "\$S:work" @rtide-workspace/p' "$ROOT/bin/rtide")
+new_session_line=$(grep -n '^tmux new-session -d ' <<< "$startup_source" | cut -d: -f1)
+mouse_option_line=$(grep -n '^tmux set-option -g mouse on$' <<< "$startup_source" | cut -d: -f1)
+(( new_session_line < mouse_option_line )) \
+  || fail 'first-run launcher applies tmux options before creating its server'
 grep -F 'DEV BUILD' "$ROOT/bin/rtide" >/dev/null \
   || fail 'development tmux badge is missing'
 grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
