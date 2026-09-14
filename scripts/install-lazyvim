@@ -3,12 +3,26 @@
 set -euo pipefail
 
 CONFIG_DIR="${RTIDE_NVIM_CONFIG_DIR:-$HOME/.config/nvim}"
-if [[ -e "$CONFIG_DIR" ]] && [[ -n "$(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
-  echo "   LazyVim skipped: existing Neovim config at $CONFIG_DIR"
+if [[ -f "$CONFIG_DIR/lua/config/lazy.lua" ]] && grep -Rqs 'LazyVim/LazyVim' "$CONFIG_DIR"; then
+  echo "   LazyVim already active at $CONFIG_DIR"
   exit 0
 fi
 command -v git >/dev/null 2>&1 || { echo 'LazyVim: git is required' >&2; exit 1; }
 mkdir -p "$(dirname "$CONFIG_DIR")"
+if [[ -e "$CONFIG_DIR" || -L "$CONFIG_DIR" ]]; then
+  if [[ -n "$(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+    backup="${CONFIG_DIR}.rtide-backup.$(date +%Y%m%d-%H%M%S)"
+    suffix=0
+    while [[ -e "$backup" || -L "$backup" ]]; do
+      suffix=$((suffix + 1))
+      backup="${CONFIG_DIR}.rtide-backup.$(date +%Y%m%d-%H%M%S).$suffix"
+    done
+    mv "$CONFIG_DIR" "$backup"
+    echo "   existing Neovim config preserved at $backup"
+  else
+    rmdir "$CONFIG_DIR"
+  fi
+fi
 stage=$(mktemp -d "${TMPDIR:-/tmp}/rtide-lazyvim.XXXXXX")
 trap 'rm -rf -- "$stage"' EXIT
 git clone --filter=blob:none https://github.com/LazyVim/starter "$stage/nvim" >/dev/null

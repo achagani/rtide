@@ -99,8 +99,9 @@ contents is safe; changed contents require a version bump.
 (optional LazyVim), and agents (claude, codex, hermes, or opencode). `--with-deps`
 installs the portable host packages for these categories through the first
 available package manager (`apt-get`, `dnf`, `brew`, `pacman`, or `zypper`). By
-default, `install.sh` also bootstraps LazyVim only when the configured Neovim
-directory is absent or empty, and prepares `~/.rtide/speech-env` without
+default, `install.sh` bootstraps LazyVim even when Neovim or an existing config
+is present; an existing non-LazyVim config is moved to a timestamped
+`nvim.rtide-backup.*` directory. It also prepares `~/.rtide/speech-env` without
 modifying system Python. Use `--without-lazyvim`, `--without-voice`, or
 `--without-deps` only to keep an intentional custom setup.
 

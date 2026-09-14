@@ -165,6 +165,10 @@ grep -F 'speech engine not prepared' "$ROOT/bin/rtide" >/dev/null \
   || fail 'doctor does not report voice state'
 grep -F -- '--without-deps' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not expose dependency opt-out'
+grep -F 'existing Neovim config preserved at' "$ROOT/scripts/install-lazyvim" >/dev/null \
+  || fail 'LazyVim bootstrap does not preserve an existing Neovim config'
+grep -F 'LazyVim already active' "$ROOT/scripts/install-lazyvim" >/dev/null \
+  || fail 'LazyVim bootstrap does not recognize an existing LazyVim config'
 
 python3 "$ROOT/scripts/package-tool" build --root "$ROOT" \
   --build-dir "$TEST_TMP/build" --dist-dir "$TEST_TMP/dist" >/dev/null
