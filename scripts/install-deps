@@ -28,11 +28,11 @@ done
 
 packages=()
 case "$manager" in
-  apt-get) packages=(git tmux neovim fish fzf python3 python3-pip python3-venv cargo pipewire pipewire-audio alsa-utils kitty sox) ;;
-  dnf) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pipewire-utils alsa-utils kitty sox) ;;
-  brew) packages=(git tmux neovim fish fzf python rust kitty sox) ;;
-  pacman) packages=(git tmux neovim fish fzf python python-pip rust pipewire pipewire-audio alsa-utils kitty sox) ;;
-  zypper) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pipewire alsa-utils kitty sox) ;;
+  apt-get) packages=(git tmux neovim fish fzf python3 python3-pip python3-venv cargo pkg-config pipewire pipewire-audio alsa-utils kitty sox libatk1.0-dev libgtk-3-dev libglib2.0-dev libgdk-pixbuf-2.0-dev libcairo2-dev libpango1.0-dev libwebkit2gtk-4.1-dev libxkbcommon-dev) ;;
+  dnf) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pkgconf-pkg-config pipewire-utils alsa-utils kitty sox atk-devel gtk3-devel glib2-devel gdk-pixbuf2-devel cairo-devel pango-devel webkit2gtk4.1-devel libxkbcommon-devel) ;;
+  brew) packages=(git tmux neovim fish fzf python rust pkg-config kitty sox gtk+3 webkitgtk cairo pango atk) ;;
+  pacman) packages=(git tmux neovim fish fzf python python-pip rust pkgconf pipewire pipewire-audio alsa-utils kitty sox atk gtk3 glib2 gdk-pixbuf2 cairo pango webkit2gtk libxkbcommon) ;;
+  zypper) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pkg-config pipewire alsa-utils kitty sox atk-devel gtk3-devel glib2-devel gdk-pixbuf-devel cairo-devel pango-devel webkit2gtk3-devel libxkbcommon-devel) ;;
 esac
 echo "   installing supported host dependencies with $manager: ${missing[*]}"
 if [[ "$manager" == brew ]]; then

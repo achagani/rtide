@@ -108,7 +108,8 @@ modifying system Python. Use `--without-lazyvim`, `--without-voice`, or
 When `tweb` is missing, the default installer clones
 `https://github.com/keyolk/tweb.git` into `~/.local/src/tweb` and runs its
 supported `make install` target under `~/.local`; the default host package set
-also installs Cargo/Rust because TWeb builds its binary with Cargo. Override the source or paths
+also installs Cargo/Rust and the GTK/ATK/WebKit development libraries because
+TWeb builds a Rust workspace against those native libraries. Override the source or paths
 with `RTIDE_TWEB_SOURCE_URL`, `RTIDE_TWEB_SOURCE_DIR`, and `RTIDE_TWEB_PREFIX`.
 Agent CLIs/authentication remain explicit because RTIDE cannot safely choose an
 agent or log it in for you. Run `rtide doctor` after bootstrap for the exact
