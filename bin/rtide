@@ -1320,8 +1320,7 @@ cmd_menu() {
     "Switch workspace" r "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD switch'" \
     "Change agent…"    m "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 70% '$RTIDE_CMD agent'" \
     "New workspace…"   n "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD new'" \
-    "Fork Manager…"     f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 58% -h 72% '$RTIDE_CMD fork-menu #{pane_id}'" \
-    "Fork conversation…" F "run-shell '$RTIDE_CMD fork-popup ${sess} ${window} #{client_name}'" \
+    "Fork conversation…" f "run-shell '$RTIDE_CMD fork-popup ${sess} ${window} #{client_name}'" \
     "" \
     "- LAYOUT & VIEW"   "" "" \
     "Refresh layout"   R "run-shell '$RTIDE_CMD refresh-window ${window}'" \
