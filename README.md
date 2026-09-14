@@ -48,7 +48,8 @@ speak, press Enter to stop, and the transcript is inserted at the cursor.
 
 - **One workspace per project** — nvim + tweb + agent strip, launched with `rtide <dir>`
 - **Forkable by default** — non-Git directories are initialized with a baseline
-  commit, enabling isolated conversation forks as sibling worktrees in new tmux windows
+  commit, enabling isolated conversation forks in globally managed Git worktrees
+  and new tmux windows without nesting checkouts inside projects
 - **Provider + harness selection** — on every new workspace, RTIDE asks which AI
   provider (anthropic / openai / ollama) and which harness (claude / codex / hermes /
   opencode) to use, filtered to compatible combinations and configured to actually talk
@@ -136,7 +137,7 @@ rtide            → pick a workspace to resume or start one (unknown names only
 rtide <dir>      → launch/attach the workspace for <dir> (prompts for provider/harness/model)
 rtide new        → guided new workspace
 rtide fork [session] [window] [name] → fork into an isolated Git worktree, agent session, and tweb pane in a new tmux window
-rtide fork list|resume|stop|status|memories|finish [name] → manage persistent feature forks
+rtide fork list|resume|stop|status|memories|migrate|finish [name] → manage persistent feature forks
 rtide progress start|checkpoint|complete → publish and continuously rerender the active implementation dashboard
 rtide switch     → same picker as bare rtide (resume / new)
 rtide ls         → list workspaces
@@ -237,10 +238,17 @@ Per-project (seeded automatically): `AGENTS.md`, `CLAUDE.md`, `.tweb/` (gitignor
 `.rtide/agent` (per-workspace provider/harness/model override), `.rtide/memory/`
 (committed).
 
+RTIDE-created forks live outside repositories at
+`${XDG_DATA_HOME:-~/.local/share}/rtide/worktrees/<repo>-<id>/<fork>`. Set
+`RTIDE_WORKTREE_ROOT` for a one-off override or `rtide config set
+worktree_root=/absolute/path` for a persistent location. RTIDE rejects a managed
+root inside any Git repository. Existing registered worktrees remain where they
+are until stopped and moved with `rtide fork migrate <name>`.
+
 ### Development workflow
 
-Develop RTIDE features in an isolated sibling worktree rather than directly in
-the primary checkout:
+For manually managed development checkouts, the conventional Git layout is an
+isolated sibling worktree rather than a checkout nested inside the primary:
 
 ```bash
 cd ~/rtide

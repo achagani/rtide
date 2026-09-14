@@ -55,6 +55,7 @@ class ForkMenuE2ETest(unittest.TestCase):
             PATH=f"{self.fake_bin}:{self.env['PATH']}",
             RTIDE_FORK_NO_LAUNCH="1",
             RTIDE_ROOT=str(ROOT),
+            RTIDE_WORKTREE_ROOT=str(self.tmp / "managed-worktrees"),
             TERM="xterm-256color",
         )
         self.client_pid = None
@@ -79,6 +80,18 @@ class ForkMenuE2ETest(unittest.TestCase):
     def tmux(self, *args, check=True):
         return self.run_command("tmux", "-S", self.socket, *args, check=check)
 
+    def worktree_for_branch(self, branch):
+        output = self.run_command(
+            "git", "-C", str(self.project), "worktree", "list", "--porcelain"
+        ).stdout.splitlines()
+        path = ""
+        for line in output:
+            if line.startswith("worktree "):
+                path = line.removeprefix("worktree ")
+            elif line == f"branch refs/heads/{branch}":
+                return Path(path)
+        return None
+
     def attach_client(self):
         master_fd, slave_fd = pty.openpty()
         pid = os.fork()
@@ -100,7 +113,7 @@ class ForkMenuE2ETest(unittest.TestCase):
         self.tmux("new-session", "-d", "-s", "ui", "-n", "work", "-c", str(self.project))
         pane = self.tmux("display-message", "-p", "-t", "ui:work", "#{pane_id}").stdout.strip()
         self.tmux("set-option", "-p", "-t", pane, "@rtide-role", "nvim")
-        for key in ("HOME", "PATH", "RTIDE_FORK_NO_LAUNCH", "RTIDE_ROOT"):
+        for key in ("HOME", "PATH", "RTIDE_FORK_NO_LAUNCH", "RTIDE_ROOT", "RTIDE_WORKTREE_ROOT"):
             self.tmux("set-environment", "-g", key, self.env[key])
         self.attach_client()
         time.sleep(0.5)
@@ -126,7 +139,7 @@ class ForkMenuE2ETest(unittest.TestCase):
         self.tmux("new-session", "-d", "-s", "ui", "-n", "work", "-c", str(self.project))
         pane = self.tmux("display-message", "-p", "-t", "ui:work", "#{pane_id}").stdout.strip()
         self.tmux("set-option", "-p", "-t", pane, "@rtide-role", "nvim")
-        for key in ("HOME", "PATH", "RTIDE_FORK_NO_LAUNCH", "RTIDE_ROOT"):
+        for key in ("HOME", "PATH", "RTIDE_FORK_NO_LAUNCH", "RTIDE_ROOT", "RTIDE_WORKTREE_ROOT"):
             self.tmux("set-environment", "-g", key, self.env[key])
         self.attach_client()
         time.sleep(0.5)
@@ -146,10 +159,14 @@ class ForkMenuE2ETest(unittest.TestCase):
         time.sleep(0.2)
         os.write(self.master_fd, b"\r")
 
-        fork = self.tmp / ".rtide-worktrees" / name
         deadline = time.time() + 8
-        while time.time() < deadline and not fork.is_dir():
+        fork = None
+        while time.time() < deadline:
+            fork = self.worktree_for_branch("rtide/fork-1")
+            if fork is not None and fork.is_dir():
+                break
             time.sleep(0.1)
+        self.assertIsNotNone(fork, "Fork Manager did not register the typed unmatched name")
         self.assertTrue(fork.is_dir(), "Fork Manager did not create the typed unmatched name")
         self.assertEqual(
             self.run_command("git", "-C", str(fork), "branch", "--show-current").stdout.strip(),
@@ -177,7 +194,7 @@ class ForkMenuE2ETest(unittest.TestCase):
         self.tmux("new-session", "-d", "-s", "ui", "-n", "work", "-c", str(self.project))
         pane = self.tmux("display-message", "-p", "-t", "ui:work", "#{pane_id}").stdout.strip()
         self.tmux("set-option", "-p", "-t", pane, "@rtide-role", "nvim")
-        for key in ("HOME", "PATH", "RTIDE_FORK_NO_LAUNCH", "RTIDE_ROOT", "FAKE_TWEB_STATUS_URL"):
+        for key in ("HOME", "PATH", "RTIDE_FORK_NO_LAUNCH", "RTIDE_ROOT", "RTIDE_WORKTREE_ROOT", "FAKE_TWEB_STATUS_URL"):
             self.tmux("set-environment", "-g", key, self.env[key])
         self.attach_client()
         time.sleep(0.5)

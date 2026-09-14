@@ -20,6 +20,26 @@ export RTIDE_INSTALL_ROOT="$HOME/.local/lib/rtide"
 export RTIDE_BIN_DIR="$HOME/.local/bin"
 mkdir -p "$RTIDE_BIN_DIR" "$TEST_TMP/build" "$TEST_TMP/dist"
 
+# The managed worktree root is visible and persistently configurable.
+mkdir -p "$HOME/.rtide"
+cat > "$HOME/.rtide/config" <<'EOF'
+provider=
+harness=
+model=
+default_dir=
+agent_lines=3
+tweb_pct=60
+shell=bash
+auto_float=false
+worktree_root=
+EOF
+configured_root="$TEST_TMP/configured-worktrees"
+bash "$ROOT/bin/rtide" config set "worktree_root=$configured_root" >/dev/null
+grep -Fx "worktree_root=$configured_root" "$HOME/.rtide/config" >/dev/null \
+  || fail 'config did not persist the managed worktree root'
+grep -F "worktree_root $configured_root" <(bash "$ROOT/bin/rtide" config) >/dev/null \
+  || fail 'config did not display the managed worktree root'
+
 # Development dispatch uses source directly and isolated configuration.
 dev_version=$(bash "$ROOT/scripts/rtide-dev" "$TEST_TMP/dev workspace" --version)
 [[ "$dev_version" == "rtide $(tr -d '[:space:]' < "$ROOT/VERSION")" ]] || fail 'development runner did not use source'
@@ -27,6 +47,11 @@ grep -F 'RTIDE_ROOT/docs/assets/rtide-mark.png' "$ROOT/bin/rtide" >/dev/null \
   || fail 'source development asset fallback is missing'
 grep -F 'export RTIDE_DEV_MODE=1' "$ROOT/scripts/rtide-dev" >/dev/null \
   || fail 'development launcher does not enable its visual identity'
+startup_source=$(sed -n '/^# A detached `make dev` may be the first RTIDE command/,/^tmux set-option -w -t "\$S:work" @rtide-workspace/p' "$ROOT/bin/rtide")
+new_session_line=$(grep -n '^tmux new-session -d ' <<< "$startup_source" | cut -d: -f1)
+mouse_option_line=$(grep -n '^tmux set-option -g mouse on$' <<< "$startup_source" | cut -d: -f1)
+(( new_session_line < mouse_option_line )) \
+  || fail 'first-run launcher applies tmux options before creating its server'
 grep -F 'DEV BUILD' "$ROOT/bin/rtide" >/dev/null \
   || fail 'development tmux badge is missing'
 grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
@@ -74,7 +99,7 @@ manager_source=$(sed -n '/^cmd_fork_menu()/,/^cmd_fork_new_popup()/p' "$ROOT/bin
 if grep -F -- '--preview-window=right:' <<< "$manager_source" >/dev/null; then
   fail 'Fork Manager still uses a clipping side preview'
 fi
-for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Repair runtime state' 'Finish and remove'; do
+for action in 'Create new fork' 'Resume or switch' 'View status' 'Stop runtime' 'Review memories' 'Repair runtime state' 'Move to managed storage' 'Finish and remove'; do
   grep -F "$action" <<< "$manager_source" >/dev/null \
     || fail "Fork Manager is missing lifecycle action: $action"
 done
