@@ -251,21 +251,54 @@ def current_tweb_url(pane):
         return None
 
 
-def show_and_verify(target, source_path=None):
-    """Submit one navigation, then observe acknowledgement without resubmitting."""
+# Display verification stages, ordered by where a failure occurs. These are
+# reported verbatim so a blank output pane identifies the stage that failed
+# instead of a generic "could not verify".
+DISPLAY_STAGES = ("artifact", "pane", "submit", "acknowledge")
+
+
+def verify_display(target, source_path=None):
+    """Submit one navigation, then observe acknowledgement.
+
+    Returns (ok, stage). ``stage`` is the first stage that could not be
+    satisfied: ``artifact`` (target missing/unreadable), ``pane`` (no registered
+    browser pane), ``submit`` (navigation command failed), or ``acknowledge``
+    (submitted but never became the active tab).
+    """
+    # artifact: the target must exist before we blame routing.
+    if target.startswith("file://"):
+        path = urllib.parse.unquote(urllib.parse.urlparse(target).path)
+        if not os.path.exists(path):
+            return False, "artifact"
+    if source_path and not os.path.exists(source_path):
+        return False, "artifact"
     pane = managed_tweb_pane()
-    # Electron startup and the twebd registration handshake can take several
-    # seconds on a cold cache. Keep retrying long enough that the first agent
-    # response is not reported as missing merely because the pane is settling.
+    if not pane:
+        return False, "pane"
     command = [TWEB_RENDER, source_path] if source_path else [TWEB_RENDER, "--url", target]
     result = subprocess.run(command, capture_output=True)
     if result.returncode:
-        return False
+        return False, "submit"
     for _ in range(30):
         if current_tweb_url(pane) == target:
-            return True
+            return True, "acknowledge"
         time.sleep(0.25)
-    return False
+    return False, "acknowledge"
+
+
+def show_and_verify(target, source_path=None):
+    """Backward-compatible boolean wrapper around verify_display."""
+    ok, _ = verify_display(target, source_path)
+    return ok
+
+
+def display_failure_message(stage):
+    return {
+        "artifact": "output artifact was not created",
+        "pane": "no registered tweb browser pane",
+        "submit": "tweb navigation was rejected",
+        "acknowledge": "submitted but tweb never displayed it",
+    }.get(stage, "tweb could not verify the result page")
 
 
 def render_request_path():
@@ -1195,14 +1228,14 @@ def main():
         with open(viewer_path, "w") as f:
             f.write(build_viewer_html(history, pdf_endpoint))
 
-        loaded = show_and_verify(target, result_path)
+        loaded, stage = verify_display(target, result_path)
         clear()
         if rc != 0:
             error_status(f"exit {rc}")
             lifecycle.publish("error", f"exit {rc}")
         elif not loaded:
-            error_status("tweb could not verify the result page")
-            lifecycle.publish("error", "tweb result not verified")
+            error_status(f"display failed at {stage}: {display_failure_message(stage)}")
+            lifecycle.publish("error", f"{stage}: {display_failure_message(stage)}")
         else:
             done_status(dt)
             needs_input, _ = requested_input(response)

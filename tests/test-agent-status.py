@@ -234,6 +234,46 @@ class AgentStatusTests(unittest.TestCase):
             )
             self.assertEqual(after, AGENT.marker_version(request))
 
+    def test_verify_display_reports_the_failing_stage(self):
+        # Missing artifact → artifact stage, before routing is considered.
+        ok, stage = AGENT.verify_display("file:///nonexistent/missing.html")
+        self.assertFalse(ok)
+        self.assertEqual(stage, "artifact")
+        # Valid artifact but no browser pane → pane stage.
+        with tempfile.TemporaryDirectory() as tmp:
+            page = os.path.join(tmp, "ok.html")
+            with open(page, "w") as f:
+                f.write("<html><title>ok</title></html>")
+            with mock.patch.object(AGENT, "managed_tweb_pane", return_value=None):
+                ok, stage = AGENT.verify_display("file://" + page)
+            self.assertEqual((ok, stage), (False, "pane"))
+            # Submission rejected → submit stage.
+            with mock.patch.object(AGENT, "managed_tweb_pane", return_value="%9"), \
+                    mock.patch.object(AGENT.subprocess, "run",
+                                      return_value=mock.Mock(returncode=1)):
+                ok, stage = AGENT.verify_display("file://" + page)
+            self.assertEqual((ok, stage), (False, "submit"))
+            # Submitted but never acknowledged → acknowledge stage.
+            with mock.patch.object(AGENT, "managed_tweb_pane", return_value="%9"), \
+                    mock.patch.object(AGENT.subprocess, "run",
+                                      return_value=mock.Mock(returncode=0)), \
+                    mock.patch.object(AGENT, "current_tweb_url", return_value="about:blank"), \
+                    mock.patch.object(AGENT.time, "sleep"):
+                ok, stage = AGENT.verify_display("file://" + page)
+            self.assertEqual((ok, stage), (False, "acknowledge"))
+            # Each stage maps to a distinct, non-generic message.
+            messages = {s: AGENT.display_failure_message(s) for s in AGENT.DISPLAY_STAGES}
+            self.assertEqual(len(set(messages.values())), len(AGENT.DISPLAY_STAGES))
+            self.assertIn("artifact", messages["artifact"])
+
+    def test_result_artifact_is_self_contained(self):
+        page = AGENT.build_result_html("Request", "Answer", "demo", 1)
+        self.assertNotIn('src="http', page)
+        self.assertNotIn('href="http', page)
+        self.assertNotIn("<script", page)
+        self.assertIn("<!DOCTYPE html>", page)
+        self.assertIn("</html>", page)
+
     def test_custom_artifact_uses_its_authored_title(self):
         with tempfile.TemporaryDirectory() as tmp:
             page = os.path.join(tmp, "field-guide.html")

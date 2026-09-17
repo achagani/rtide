@@ -1,7 +1,7 @@
 # 001: Review-first LazyVim startup
 
 - Status: proposed
-- Priority rank: 3
+- Priority rank: 2
 - Branch: `issue/001-review-first-lazyvim-startup`
 - Worktree: `../rtide-worktrees/001-review-first-lazyvim-startup`
 

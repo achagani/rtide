@@ -1,6 +1,6 @@
 # 005: Output-pane reliability
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/005-output-pane-reliability`
 - Worktree: `../rtide-worktrees/005-output-pane-reliability`
@@ -78,4 +78,25 @@ pending until the remaining acknowledgement gap is resolved.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/005-output-pane-reliability`, branch
+`issue/005-output-pane-reliability`, as RTIDE 0.2.55.
+
+- Extended issue 004's acknowledgement work with stage-accurate blank-output
+  diagnostics. `verify_display` now returns `(ok, stage)` where stage is the
+  first unsatisfied step — `artifact`, `pane`, `submit`, or `acknowledge` — and
+  each maps to a distinct message (`display failed at <stage>: …`) instead of a
+  generic "could not verify".
+- Confirmed every substantive request still produces a self-contained artifact:
+  the result page has no external `src`/`href`/`<script>` references, verified by
+  test.
+- Output history links each entry to its artifact and reads custom artifacts'
+  authored titles; implementation dashboards remain a distinct output kind.
+- Render completion (`submitted`) stays distinct from visual acknowledgement
+  across `rtide render`, `rtide run`, and the agent turn boundary.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.55 is the active
+immutable release. Added tests for each failure stage, distinct stage messages,
+and result-artifact self-containment; existing routing, recovery, and history
+tests still pass.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.
