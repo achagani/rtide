@@ -1,6 +1,6 @@
 # 004: TWeb connection recovery
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/004-tweb-connection-recovery`
 - Worktree: `../rtide-worktrees/004-tweb-connection-recovery`
@@ -79,4 +79,28 @@ recovery and visual acknowledgement remain broader than startup readiness.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/004-tweb-connection-recovery`, branch
+`issue/004-tweb-connection-recovery`, as RTIDE 0.2.53.
+
+- Added a five-state connection model (`connected`, `disconnected`, `missing`,
+  `multiple`, `standalone`) to `libexec/rtide/tweb-common.sh`. A pane is only
+  reported connected after `tweb status` confirms a running browser in it.
+- Queued output is tracked separately; `rtide render`/`run` now print
+  `rendered` (acknowledged), `submitted … awaiting acknowledgement`, or
+  `queued`, and never claim display for a queued or merely submitted target.
+- Recovery reuses the registered pane: `disconnected` panes are reconnected in
+  place, and `rtide tweb recover` repairs a browserless registration without
+  creating a pane.
+- `rtide tweb recreate` is the explicit safe path for a missing pane. It refuses
+  when a role pane already exists, so it cannot create a duplicate, and it is
+  not invoked during an agent turn.
+- Added `rtide tweb status|recover|recreate` and documented the routing contract
+  in `docs/architecture/output-routing.md`.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.53 is the active
+immutable release. Added `tests/test-tweb-recovery.sh` plus a state-aware `tweb`
+fixture covering connected/disconnected/missing/multiple classification,
+acknowledged display, queued preservation, in-place reconnect, and
+duplicate-refusing recreation. Existing output-routing tests still pass.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.

@@ -14,6 +14,15 @@ case "${1:-}" in
   list-panes)
     printf '%b' "${FAKE_PANES:-%1 nvim\n%2 agent\n%3 tweb\n}"
     ;;
+  list-windows)
+    printf '%s\n' "${FAKE_WINDOWS:-@1 rtide-test}"
+    ;;
+  split-window)
+    printf '%%99\n'
+    ;;
+  set-option|select-pane|run-shell|refresh-client|capture-pane|resize-pane|resize-window|send-keys|set-hook|set-environment|rename-window|switch-client)
+    :
+    ;;
   *)
     printf 'unexpected tmux call: %q' "$1" >&2
     exit 64

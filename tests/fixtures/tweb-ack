@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Fake tweb supporting status/navigate/open for connection-recovery tests.
+# FAKE_TWEB_LOG       — append every invocation
+# FAKE_TWEB_LIVE      — 0 = status fails (no browser running)
+# FAKE_TWEB_ACTIVE_URL— active tab URL returned by `status --json`
+# FAKE_TWEB_ACK       — 1 = acknowledge the target after navigate/open
+set -euo pipefail
+
+: "${FAKE_TWEB_LOG:?FAKE_TWEB_LOG is required}"
+printf '%q ' "$@" >> "$FAKE_TWEB_LOG"
+printf '\n' >> "$FAKE_TWEB_LOG"
+
+case "${1:-}" in
+  status)
+    [[ "${FAKE_TWEB_LIVE:-1}" == 1 ]] || { echo "no running tweb browser pane" >&2; exit 1; }
+    state="${FAKE_TWEB_STATE:-/dev/null}"
+    active=""
+    [[ -r "$state" ]] && active=$(head -n1 "$state" 2>/dev/null || true)
+    printf '{"tabs":{"tabs":[{"url":"%s","active":true}]}}\n' "${active:-${FAKE_TWEB_ACTIVE_URL:-}}"
+    ;;
+  navigate|open)
+    # Record the target so a later `status` can acknowledge it.
+    if [[ -n "${FAKE_TWEB_STATE:-}" ]]; then
+      printf '%s\n' "${*: -1}" > "$FAKE_TWEB_STATE"
+    fi
+    ;;
+esac

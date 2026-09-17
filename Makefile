@@ -44,6 +44,7 @@ test: check
 	./tests/test-permissions.sh
 	./tests/test-libexec-isolation.sh
 	./tests/test-output-routing.sh
+	./tests/test-tweb-recovery.sh
 	./tests/test-fork.sh
 	python3 -m unittest tests/test-fork-menu-e2e.py
 	python3 -m unittest tests/test-agent-status.py

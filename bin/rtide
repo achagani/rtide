@@ -1857,6 +1857,62 @@ bind_voice_click() {
     'send-keys -M'
 }
 
+# Inspect and recover the workspace output connection.
+#   rtide tweb status [dir]      → connected/disconnected/missing/multiple
+#   rtide tweb recover [dir]     → reconnect a live pane or repair registration
+#   rtide tweb recreate [dir]    → explicit safe creation of the one role pane
+cmd_tweb() {
+  local sub="${2:-status}" dir="${3:-${RTIDE_WORKSPACE:-$PWD}}" window
+  dir=$(realpath -m "$dir")
+  RTIDE_WORKSPACE="$dir"
+  case "$sub" in
+    status)
+      rtide_tweb_report
+      ;;
+    recover)
+      rtide_tweb_state
+      case "$RTIDE_TWEB_STATE" in
+        connected)
+          printf 'tweb recover: already connected (%s)\n' "$RTIDE_TWEB_PANE"
+          ;;
+        disconnected)
+          rtide_tweb_reconnect "$RTIDE_TWEB_PANE" "$dir" \
+            || { printf 'tweb recover: could not reconnect %s\n' "$RTIDE_TWEB_PANE" >&2; exit 1; }
+          printf 'tweb recover: reconnected pane %s\n' "$RTIDE_TWEB_PANE"
+          ;;
+        missing)
+          # Reuse an existing window registration rather than creating a pane.
+          window=$(tmux display-message -p '#{window_id}' 2>/dev/null || true)
+          printf 'tweb recover: pane is missing; run "rtide tweb recreate" to create one\n' >&2
+          exit 2
+          ;;
+        multiple)
+          printf 'tweb recover: multiple role=tweb panes; resolve manually\n' >&2
+          exit 2
+          ;;
+        *)
+          printf 'tweb recover: no RTIDE workspace context for %s\n' "$dir" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    recreate)
+      window=$(tmux display-message -p '#{window_id}' 2>/dev/null || true)
+      if [[ -z "$window" ]]; then
+        # Allow targeting the workspace's own window when run outside tmux.
+        window=$(tmux list-windows -a -F '#{window_id} #{@rtide-workspace}' 2>/dev/null \
+          | awk -v d="$dir" '$2==d{print $1; exit}')
+      fi
+      rtide_tweb_recreate "$window" "$dir"
+      ;;
+    *)
+      echo "usage: rtide tweb [status|recover|recreate] [dir]" >&2
+      exit 2
+      ;;
+  esac
+  exit 0
+}
+
 cmd_workspace_rail() {
   local client="${2:-}" dimensions width height mode x y command
   [[ -n "$client" ]] || client=$(tmux display-message -p '#{client_name}' 2>/dev/null || true)
@@ -1880,6 +1936,7 @@ case "${1:-}" in
   open) shift; run_helper open "$@" ;;
   progress) shift; run_helper progress "$@" ;;
   workspace-status) shift; run_helper workspace-status "$@" ;;
+  tweb) cmd_tweb "$@" ;;
   memory) shift; run_helper memory "$@" ;;
   mcp)
     shift
