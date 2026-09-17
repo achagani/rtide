@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""Canonical RTIDE workspace lifecycle records and tmux workspace rail."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+
+
+LIFECYCLES = ("working", "input-needed", "done", "ready", "error")
+STALE_AFTER = int(os.environ.get("RTIDE_STATUS_STALE_SECONDS", "90"))
+ICONS = {
+    "working": "*", "input-needed": "?", "done": "!", "ready": "o",
+    "error": "x", "stale": "~",
+}
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_time(value: str) -> float:
+    try:
+        return dt.datetime.fromisoformat(value).timestamp()
+    except (TypeError, ValueError):
+        return 0
+
+
+def runtime_root() -> Path:
+    configured = os.environ.get("RTIDE_STATUS_DIR")
+    if configured:
+        return Path(configured)
+    base = Path(os.environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir()))
+    return base / f"rtide-{os.getuid()}" / "workspace-status"
+
+
+def tmux_server_id() -> str:
+    socket = os.environ.get("TMUX", "").split(",", 1)[0]
+    return hashlib.sha256(socket.encode()).hexdigest()[:12] if socket else "default"
+
+
+def record_key(server: str, window_id: str) -> str:
+    return hashlib.sha256(f"{server}\0{window_id}".encode()).hexdigest()[:24]
+
+
+def atomic_json(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(value, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def run_tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["tmux", *args], capture_output=True, text=True, check=check)
+
+
+def pane_location(pane: str) -> dict[str, str]:
+    fmt = "#{session_name}\t#{session_id}\t#{window_id}\t#{window_name}\t#{@rtide-workspace}"
+    result = run_tmux("display-message", "-p", "-t", pane, fmt)
+    fields = result.stdout.rstrip("\n").split("\t")
+    if result.returncode or len(fields) != 5 or not fields[4]:
+        raise RuntimeError("cannot resolve an RTIDE window from the current pane")
+    return dict(zip(("session", "session_id", "window_id", "label", "workspace"), fields))
+
+
+def fork_metadata(workspace: str) -> tuple[str, str]:
+    origin = Path(workspace) / ".rtide" / "fork-origin"
+    values: dict[str, str] = {}
+    try:
+        for line in origin.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key] = value
+    except OSError:
+        pass
+    return values.get("source", ""), values.get("branch", "")
+
+
+def git_branch(workspace: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", workspace, "branch", "--show-current"],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def status_path(server: str, window_id: str) -> Path:
+    return runtime_root() / f"{record_key(server, window_id)}.json"
+
+
+def locked_update(path: Path, update) -> dict[str, object]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(".lock")
+    with lock_path.open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            current = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = {}
+        value = update(current)
+        atomic_json(path, value)
+        return value
+
+
+def publish(pane: str, lifecycle: str, reason: str = "") -> dict[str, object]:
+    location = pane_location(pane)
+    server = tmux_server_id()
+    path = status_path(server, location["window_id"])
+    workspace = os.path.realpath(location["workspace"])
+    fork_source, fork_branch = fork_metadata(workspace)
+
+    def update(current: dict[str, object]) -> dict[str, object]:
+        attention = dict(current.get("attention", {}))
+        if lifecycle == "input-needed":
+            attention = {"reason": reason or "input-needed", "acknowledged": False}
+        elif lifecycle == "done":
+            attention = {"reason": reason or "done-unseen", "acknowledged": False}
+        elif lifecycle in {"working", "ready"}:
+            attention = {"reason": "", "acknowledged": True}
+        elif lifecycle == "error":
+            attention = {"reason": reason or "error", "acknowledged": False}
+        now = utc_now()
+        return {
+            "schema": 1,
+            "identity": hashlib.sha256(workspace.encode()).hexdigest()[:20],
+            "server": server,
+            **location,
+            "workspace": workspace,
+            "branch": fork_branch or git_branch(workspace),
+            "fork": {"source": os.path.realpath(fork_source) if fork_source else ""},
+            "lifecycle": lifecycle,
+            "attention": attention,
+            "updated": now,
+            "heartbeat": now,
+            "publisher_pid": os.getpid(),
+        }
+
+    record = locked_update(path, update)
+    icon = ICONS[lifecycle]
+    run_tmux("set-option", "-w", "-t", location["window_id"], "@rtide-state", lifecycle)
+    run_tmux("set-option", "-w", "-t", location["window_id"], "@rtide-status-icon", icon)
+    run_tmux("refresh-client", "-S")
+    return record
+
+
+def heartbeat(pane: str) -> dict[str, object]:
+    location = pane_location(pane)
+    path = status_path(tmux_server_id(), location["window_id"])
+
+    def update(current: dict[str, object]) -> dict[str, object]:
+        if not current:
+            raise RuntimeError("cannot heartbeat before initial status publication")
+        current["heartbeat"] = utc_now()
+        current["publisher_pid"] = os.getpid()
+        return current
+
+    return locked_update(path, update)
+
+
+def acknowledge(window: str, action: str) -> dict[str, object] | None:
+    server = tmux_server_id()
+    path = status_path(server, window)
+    if not path.exists():
+        return None
+
+    def update(current: dict[str, object]) -> dict[str, object]:
+        attention = dict(current.get("attention", {}))
+        reason = attention.get("reason", "")
+        allowed = action == "answer" or (action == "focus" and reason == "done-unseen")
+        if allowed:
+            current["attention"] = {"reason": "", "acknowledged": True}
+            if current.get("lifecycle") in {"done", "input-needed"}:
+                current["lifecycle"] = "ready"
+            current["updated"] = utc_now()
+        return current
+
+    record = locked_update(path, update)
+    if record.get("lifecycle") == "ready":
+        run_tmux("set-option", "-w", "-t", window, "@rtide-state", "ready")
+        run_tmux("set-option", "-w", "-t", window, "@rtide-status-icon", ICONS["ready"])
+        run_tmux("refresh-client", "-S")
+    return record
+
+
+def load_records(now: float | None = None) -> dict[tuple[str, str], dict[str, object]]:
+    now = time.time() if now is None else now
+    records: dict[tuple[str, str], dict[str, object]] = {}
+    for path in runtime_root().glob("*.json"):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if now - parse_time(str(record.get("heartbeat", ""))) > STALE_AFTER:
+            record = dict(record)
+            record["display_state"] = "stale"
+        else:
+            record["display_state"] = record.get("lifecycle", "ready")
+        records[(str(record.get("server", "")), str(record.get("window_id", "")))] = record
+    return records
+
+
+def inventory(now: float | None = None) -> list[dict[str, object]]:
+    fmt = "#{session_name}\t#{session_id}\t#{window_id}\t#{window_name}\t#{@rtide-workspace}\t#{window_active}\t#{session_attached}"
+    result = run_tmux("list-windows", "-a", "-F", fmt)
+    if result.returncode:
+        return []
+    server = tmux_server_id()
+    records = load_records(now)
+    records_by_window: dict[str, list[dict[str, object]]] = {}
+    for (_, record_window), record in records.items():
+        records_by_window.setdefault(record_window, []).append(record)
+    items = []
+    for line in result.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 7 or not fields[4]:
+            continue
+        session, session_id, window_id, label, workspace, active, attached = fields
+        workspace = os.path.realpath(workspace)
+        record = records.get((server, window_id), {})
+        if not record and len(records_by_window.get(window_id, [])) == 1:
+            # Commands launched outside tmux can still query its default server.
+            # Match its immutable window ID when only one server record can match.
+            record = records_by_window[window_id][0]
+        source, branch = fork_metadata(workspace)
+        state = str(record.get("display_state", "ready"))
+        attention = record.get("attention", {})
+        items.append({
+            "identity": record.get("identity") or hashlib.sha256(workspace.encode()).hexdigest()[:20],
+            "target": f"{session}:{window_id}", "session": session,
+            "session_id": session_id, "window_id": window_id, "label": label,
+            "workspace": workspace, "branch": record.get("branch") or branch,
+            "fork_source": record.get("fork", {}).get("source", "") or source,
+            "state": state, "attention": attention.get("reason", ""),
+            "active": active == "1", "attached": int(attached or 0),
+        })
+    items.sort(key=lambda item: (str(item["fork_source"] or item["workspace"]), bool(item["fork_source"]), str(item["label"])))
+    return items
+
+
+def rail_geometry(width: int, height: int) -> dict[str, object]:
+    if width < 72 or height < 16:
+        return {"mode": "compact", "width": max(30, min(width - 4, 64)),
+                "height": max(10, min(height - 4, 24)), "x": "C", "y": "C"}
+    return {"mode": "rail", "width": min(42, max(32, width // 4)),
+            "height": height, "x": "R", "y": 0}
+
+
+def state_label(item: dict[str, object]) -> str:
+    state = str(item["state"])
+    return f"{ICONS.get(state, '?')} {state}"
+
+
+def print_list(as_json: bool, tsv: bool) -> None:
+    items = inventory()
+    if as_json:
+        print(json.dumps(items, indent=2))
+        return
+    for item in items:
+        indent = "  " if item["fork_source"] else ""
+        label = indent + str(item["label"])
+        print("\t".join((str(item["target"]), str(item["workspace"]), label,
+                         state_label(item), str(item["attention"]), str(item["branch"]))))
+
+
+def rail(client: str) -> int:
+    items = inventory()
+    if not items:
+        print("No active RTIDE workspaces")
+        return 0
+    rows = ["\t".join((str(item["target"]), state_label(item), str(item["label"]),
+                       str(item["workspace"]), str(item["branch"]))) for item in items]
+    result = subprocess.run(
+        ["fzf", "--layout=reverse", "--no-sort", "--border=none", "--delimiter=\t",
+         "--with-nth=2,3,5", "--prompt=workspace > ",
+         "--header=RTIDE workspaces | Enter/click switch | Esc hide"],
+        input="\n".join(rows) + "\n", capture_output=True, text=True,
+    )
+    if result.returncode or not result.stdout.strip():
+        return 0
+    target = result.stdout.split("\t", 1)[0]
+    switch(client, target)
+    return 0
+
+
+def switch(client: str, target: str) -> None:
+    if not client or not target:
+        raise RuntimeError("switching requires an invoking client and target")
+    window = target.rsplit(":", 1)[-1]
+    result = run_tmux("switch-client", "-c", client, "-t", target)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "tmux switch failed")
+    acknowledge(window, "focus")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="rtide workspace-status")
+    sub = parser.add_subparsers(dest="command", required=True)
+    pub = sub.add_parser("publish"); pub.add_argument("lifecycle", choices=LIFECYCLES); pub.add_argument("--pane", default=os.environ.get("TMUX_PANE", "")); pub.add_argument("--reason", default="")
+    beat = sub.add_parser("heartbeat"); beat.add_argument("--pane", default=os.environ.get("TMUX_PANE", ""))
+    ack = sub.add_parser("acknowledge"); ack.add_argument("--window", required=True); ack.add_argument("--action", choices=("focus", "answer"), required=True)
+    listing = sub.add_parser("list"); listing.add_argument("--json", action="store_true"); listing.add_argument("--tsv", action="store_true")
+    geometry = sub.add_parser("geometry"); geometry.add_argument("width", type=int); geometry.add_argument("height", type=int); geometry.add_argument("--shell", action="store_true")
+    rail_parser = sub.add_parser("rail"); rail_parser.add_argument("--client", required=True)
+    switch_parser = sub.add_parser("switch"); switch_parser.add_argument("--client", required=True); switch_parser.add_argument("--target", required=True)
+    args = parser.parse_args()
+    try:
+        if args.command == "publish": publish(args.pane, args.lifecycle, args.reason)
+        elif args.command == "heartbeat": heartbeat(args.pane)
+        elif args.command == "acknowledge": acknowledge(args.window, args.action)
+        elif args.command == "list": print_list(args.json, args.tsv)
+        elif args.command == "geometry":
+            value = rail_geometry(args.width, args.height)
+            if args.shell:
+                print(" ".join(f"{key}={value[key]}" for key in ("mode", "width", "height", "x", "y")))
+            else:
+                print(json.dumps(value))
+        elif args.command == "rail": return rail(args.client)
+        elif args.command == "switch": switch(args.client, args.target)
+        return 0
+    except RuntimeError as error:
+        print(f"workspace status error: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

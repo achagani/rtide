@@ -16,9 +16,10 @@ PYTHON_SOURCES := libexec/rtide/agent libexec/rtide/composer.py libexec/rtide/di
  libexec/rtide/output-controls tests/test-output-controls.py \
  scripts/install-tmux tests/test-install-tmux.py \
 	libexec/rtide/fork-status libexec/rtide/forks libexec/rtide/memory-index \
-	libexec/rtide/progress libexec/rtide/settings scripts/bump-version scripts/package-tool \
-	tests/test-agent-status.py tests/test-composer.py tests/test-fork-manager.py tests/test-memory-index.py \
-	tests/test-progress.py
+	libexec/rtide/progress libexec/rtide/settings libexec/rtide/workspace-status \
+	scripts/bump-version scripts/package-tool \
+	tests/test-agent-status.py tests/test-composer.py tests/test-fork-manager.py \
+	tests/test-memory-index.py tests/test-progress.py tests/test-workspace-status.py
 
 .PHONY: all check test build clean dev install stage verify-install bump-patch bump-minor bump-major
 
@@ -49,6 +50,7 @@ test: check
 	python3 -m unittest tests/test-fork-manager.py
 	python3 -m unittest tests/test-memory-index.py
 	python3 -m unittest tests/test-progress.py
+	python3 -m unittest tests/test-workspace-status.py
 	./tests/test-installation.sh
 
 build: test

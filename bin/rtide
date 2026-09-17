@@ -67,6 +67,7 @@ printf -v RTIDE_CMD '%q' "$SCRIPT_PATH"
 printf -v RTIDE_AGENT_CMD '%q' "$RTIDE_LIBEXEC_DIR/agent"
 printf -v RTIDE_MEM_CMD '%q' "$RTIDE_LIBEXEC_DIR/memory"
 printf -v RTIDE_FORKS_CMD '%q' "$RTIDE_LIBEXEC_DIR/forks"
+printf -v RTIDE_STATUS_CMD '%q' "$RTIDE_LIBEXEC_DIR/workspace-status"
 
 cmd_version() {
   local verbose="${1:-}" version revision digest
@@ -396,6 +397,7 @@ validate_fork_snapshot() {
     libexec/rtide/memory-index libexec/rtide/open libexec/rtide/pane-popup
     libexec/rtide/picker.sh libexec/rtide/progress libexec/rtide/provider
     libexec/rtide/render libexec/rtide/run libexec/rtide/tweb-common.sh
+    libexec/rtide/workspace-status
     libexec/rtide/guard-bin/tweb share/AGENTS.md share/template.html
   )
   while IFS= read -r required_file; do
@@ -692,18 +694,21 @@ dispatch_fork_menu_action() {
 }
 
 cmd_fork_menu() {
-  local pane="${2:-${TMUX_PANE:-}}" sess window client root output decision mode selected name branch state ahead path memories action running label
+  local pane="${2:-${TMUX_PANE:-}}" sess window client root output decision mode selected name branch state ahead path memories action running label lifecycle status_inventory
   [[ -n "$pane" ]] || return 1
   sess=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
   window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
   client=$(tmux display-message -p -t "$pane" '#{client_name}' 2>/dev/null || true)
   root=$(fork_root_from_context "$pane") || { echo "fork: not in a Git repository" >&2; return 1; }
   command -v fzf >/dev/null 2>&1 || { echo "fork: fzf is required for the visual manager" >&2; return 1; }
+  status_inventory=$("$RTIDE_LIBEXEC_DIR/workspace-status" list --tsv 2>/dev/null || true)
   output=$({
       printf '＋ Create new fork\tnew\t\t\t\t\n'
       while IFS=$'\t' read -r name branch state ahead path memories; do
         running=$(fork_running_window "$sess" "$path")
         label=$([[ -n "$running" ]] && printf '● running' || printf '○ stopped')
+        lifecycle=$(awk -F '\t' -v workspace="$path" '$2==workspace{print $4; exit}' <<< "$status_inventory")
+        [[ -z "$lifecycle" ]] || label="$label · $lifecycle"
         printf '%s\t%s\t%s · %s\t%s\t%s\t%s\n' "$name" "$branch" "$label" "$state" "$ahead" "$path" "$memories"
       done < <("$RTIDE_LIBEXEC_DIR/forks" --root "$root" list)
     } \
@@ -909,13 +914,19 @@ install_session_hooks() {
   # also covers programmatic/terminal-driven window changes.
   tmux set-hook -t "$sess" after-resize-window \
     "run-shell '$RTIDE_CMD refresh-window #{window_id} >/dev/null 2>&1'" 2>/dev/null || true
+  # Focus acknowledges done-unseen for the selected window. Input-needed is
+  # intentionally not cleared by focus and waits for the next submitted answer.
+  tmux set-hook -t "$sess" after-select-window \
+    "run-shell '$RTIDE_STATUS_CMD acknowledge --window #{window_id} --action focus >/dev/null 2>&1'" 2>/dev/null || true
+  tmux set-option -t "$sess" window-status-format '#I:#W #{@rtide-status-icon}'
+  tmux set-option -t "$sess" window-status-current-format '#[bold]#I:#W #{@rtide-status-icon}'
 }
 
 # Resume a workspace on its editor pane. tmux remembers the last active pane
 # per session, which is often the agent input strip; selecting the workspace
 # should consistently return the user to the main editing surface instead.
 resume_session() {
-  local sess="$1" pane tweb
+  local sess="$1" target="${2:-}" pane tweb
   tmux set-option -t "$sess" allow-passthrough all
   # RTIDE relies on mouse events for pane focus, border resizing, and tweb.
   # Re-enable it in case the global prefix+m toggle disabled it at runtime.
@@ -923,7 +934,13 @@ resume_session() {
   install_session_hooks "$sess"
   tweb=$(tmux list-panes -s -t "$sess" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="tweb"{print $1; exit}')
   [[ -z "$tweb" ]] || rtide_tweb_controls "$tweb"
-  pane=$(tmux list-panes -s -t "$sess" -F '#{pane_id}' -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
+  if [[ -n "$target" ]]; then
+    pane=$(tmux list-panes -t "$target" -F '#{pane_id}' \
+      -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
+  else
+    pane=$(tmux list-panes -s -t "$sess" -F '#{pane_id}' \
+      -f '#{==:#{@rtide-role},nvim}' 2>/dev/null | head -1)
+  fi
   if [[ -n "$pane" ]]; then
     # The editor may live in a non-current window if the user added windows.
     tmux select-window -t "$pane" 2>/dev/null || true
@@ -942,22 +959,18 @@ resume_session() {
 # working directory is sorted first and marked, so Enter resumes it directly.
 # Enter opens an existing match or creates a workspace for an unknown query.
 cmd_pick() {
-  local sessions cur s dir sdir disp
+  local sessions cur s dir label lifecycle attention branch sdir disp session
   local -a items=()
-  sessions=$(tmux list-sessions -F "#{session_name}"$'\t'"#{session_path}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
+  sessions=$("$RTIDE_LIBEXEC_DIR/workspace-status" list --tsv 2>/dev/null || true)
   if [[ -z "$sessions" ]]; then
     echo "no workspaces — start a new one"
     exec "$0" new
   fi
   cur=$(realpath -m "$PWD")
   local DIM=$'\033[2m' YEL=$'\033[33m' CYAN=$'\033[36m' RESET=$'\033[0m'
-  while IFS=$'\t' read -r s dir; do
-    # Prefer the first pane's real path — session_path can be stale/relative
-    # (workspaces created before paths were normalized) and would otherwise
-    # resolve against the picker's own cwd, not the workspace's.
-    pdir=$(tmux list-panes -t "$s" -F '#{pane_current_path}' 2>/dev/null | head -1)
-    sdir=$(realpath -m "${pdir:-$dir}")
-    disp="${DIM}${sdir/#$HOME/~}${RESET}"
+  while IFS=$'\t' read -r s dir label lifecycle attention branch; do
+    sdir=$(realpath -m "$dir")
+    disp="${DIM}${sdir/#$HOME/~}${RESET} · ${lifecycle}"
     if [[ "$sdir" == "$cur" ]]; then
       # current dir first (fzf preselects line 1 → Enter resumes it)
       items=("$s"$'\t'"$disp"$'\t'"${YEL}◀ you are here${RESET}" "${items[@]}")
@@ -968,7 +981,7 @@ cmd_pick() {
   items+=("${CYAN}+${RESET} new workspace"$'\tworkspace\t')
 
   if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
-    local out decision mode qry sel sess rc
+    local out decision mode qry sel sess rc target
     while true; do
       # `if` so `set -e` doesn't kill us on fzf's non-zero exits; rc tells
       # abort (130 = Esc/Ctrl-C) apart from no-match (1 = Enter on a query
@@ -980,7 +993,7 @@ cmd_pick() {
             --header="RTIDE — open or create a workspace\n$(rtide_picker_header create)" \
             --prompt='❯ ' --height=60% --border \
             --preview-window=right:40% \
-            --preview 's={1}; if tmux has-session -t "$s" 2>/dev/null; then d=$(tmux list-panes -t "$s" -F "#{pane_current_path}" 2>/dev/null | head -1); [ -z "$d" ] && d=$(tmux display-message -p -t "$s" "#{session_path}"); echo "dir: $d"; [ -f "$d/.rtide/agent" ] && { echo; echo "agent:"; sed "s/^/    /" "$d/.rtide/agent"; }; act=$(tmux display-message -p -t "$s" "#{session_activity}"); [ -n "$act" ] && act=$(date -d "@$act" "+%H:%M  %a %d %b"); echo; echo "last: ${act:-?}   ·   $(tmux display-message -p -t "$s" "#{session_windows}")w  $(tmux display-message -p -t "$s" "#{session_attached}")attached"; tmux list-panes -t "$s" -F "    #{@rtide-role}   #{pane_width}x#{pane_height}"; else echo "start a new workspace (Enter)"; fi' ); then
+            --preview 's={1}; d={2}; session=${s%%:*}; if tmux has-session -t "$session" 2>/dev/null; then echo "dir: $d"; [ -f "$d/.rtide/agent" ] && { echo; echo "agent:"; sed "s/^/    /" "$d/.rtide/agent"; }; echo; tmux list-panes -t "$s" -F "    #{@rtide-role}   #{pane_width}x#{pane_height}"; else echo "start a new workspace (Enter)"; fi' ); then
         rc=0
       else
         rc=$?
@@ -993,9 +1006,10 @@ cmd_pick() {
         [[ -n "$sel" ]] && exec "$0" "$sel"
         exec "$0" new
       elif [[ "$mode" == open ]]; then
-        sess=$(printf '%s' "$sel" | cut -f1)
+        target=$(printf '%s' "$sel" | cut -f1)
+        sess=${target%%:*}
         if tmux has-session -t "$sess" 2>/dev/null; then
-          resume_session "$sess" \
+          resume_session "$sess" "$target" \
             || echo "could not open $sess — attach with: tmux attach -t $sess" >&2
           exit 0
         fi
@@ -1023,8 +1037,9 @@ cmd_pick() {
       exec "$0" new
     fi
     if [[ -n "$sel" ]]; then
-      sess=$(printf '%s' "$sel" | cut -f1)
-      resume_session "$sess" \
+      target=$(printf '%s' "$sel" | cut -f1)
+      sess=${target%%:*}
+      resume_session "$sess" "$target" \
         || echo "could not open $sess — attach with: tmux attach -t $sess" >&2
     else
       printf "no workspace matches '%s' — type 'new' to create one\n" "$ans" >&2
@@ -1836,12 +1851,29 @@ bind_voice_click() {
     'send-keys -M'
 }
 
+cmd_workspace_rail() {
+  local client="${2:-}" dimensions width height mode x y command
+  [[ -n "$client" ]] || client=$(tmux display-message -p '#{client_name}' 2>/dev/null || true)
+  [[ -n "$client" ]] || { echo "workspace rail: no invoking tmux client" >&2; return 1; }
+  dimensions=$(tmux display-message -p -c "$client" '#{client_width} #{client_height}' 2>/dev/null) \
+    || { echo "workspace rail: invoking client is no longer attached" >&2; return 1; }
+  read -r width height <<< "$dimensions"
+  read -r mode width height x y \
+    < <("$RTIDE_LIBEXEC_DIR/workspace-status" geometry "$width" "$height" --shell)
+  mode=${mode#mode=}; width=${width#width=}; height=${height#height=}
+  x=${x#x=}; y=${y#y=}
+  printf -v command '%q rail --client %q' "$RTIDE_LIBEXEC_DIR/workspace-status" "$client"
+  tmux display-popup -E -t "$client" -b rounded -x "$x" -y "$y" \
+    -w "$width" -h "$height" "$command"
+}
+
 case "${1:-}" in
   --version|-V) cmd_version; exit 0 ;;
   --help|-h|help) cmd_help; exit 0 ;;
   version) cmd_version "${2:-}"; exit 0 ;;
   open) shift; run_helper open "$@" ;;
   progress) shift; run_helper progress "$@" ;;
+  workspace-status) shift; run_helper workspace-status "$@" ;;
   memory) shift; run_helper memory "$@" ;;
   mcp)
     shift
@@ -1866,6 +1898,7 @@ case "${1:-}" in
   fork-menu-action) cmd_fork_menu_action "$@"; exit 0 ;;
   fork-new-popup) cmd_fork_new_popup "$@"; exit 0 ;;
   switch) cmd_pick ;;
+  rail) cmd_workspace_rail "$@" ;;
   zoom)   cmd_zoom "$@" ;;
   ls)     cmd_ls ;;
   sweep)  cmd_sweep ;;
@@ -1950,12 +1983,16 @@ if ! git -C "$DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
     commit --allow-empty -m "Initialize RTIDE workspace" >/dev/null
 fi
 
-S="${SESSION_PREFIX}$(basename "$DIR")"
-if tmux has-session -t "$S" 2>/dev/null; then
-  resume_session "$S" \
+RUNNING_TARGET=$("$RTIDE_LIBEXEC_DIR/workspace-status" list --tsv 2>/dev/null \
+  | awk -F '\t' -v workspace="$DIR" '$2==workspace{print $1; exit}' || true)
+if [[ -n "$RUNNING_TARGET" ]]; then
+  S=${RUNNING_TARGET%%:*}
+  resume_session "$S" "$RUNNING_TARGET" \
     || echo "could not open $S — attach with: tmux attach -t $S" >&2
   exit 0
 fi
+WORKSPACE_KEY=$(printf '%s' "$DIR" | sha256sum | cut -c1-8)
+S="${SESSION_PREFIX}$(basename "$DIR")-$WORKSPACE_KEY"
 
 # Per-workspace override + always-ask selection (new workspace)
 WS_AGENT="$DIR/$WS_AGENT_FILE"
@@ -2116,6 +2153,7 @@ bind_pane_popup
 bind_dictation
 bind_voice_click
 bind_if_free r "run-shell '$RTIDE_CMD switch'"
+bind_if_free w "run-shell '$RTIDE_CMD rail #{client_name}'"
 bind_if_free Q "confirm-before -p 'quit workspace? (y/n) ' \"run-shell '$RTIDE_CMD quit #{session_name}'\""
 bind_if_free R "run-shell '$RTIDE_CMD refresh-window #{window_id}'"
   tmux bind-key A run-shell "$RTIDE_CMD menu '#{session_name}' '#{window_id}' '#{client_name}'"

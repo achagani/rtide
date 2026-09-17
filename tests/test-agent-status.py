@@ -44,6 +44,19 @@ class AgentStatusTests(unittest.TestCase):
             with open(marker) as marker_file:
                 self.assertEqual(int(marker_file.read()), os.getpid())
 
+    def test_lifecycle_publisher_emits_events_and_bounded_heartbeat(self):
+        completed = mock.Mock(returncode=0)
+        with mock.patch.object(AGENT.subprocess, "run", return_value=completed) as run:
+            publisher = AGENT.LifecyclePublisher("%9", heartbeat_interval=0.01)
+            self.assertTrue(publisher.publish("input-needed", "question"))
+            publisher.start()
+            publisher.stop_event.wait(0.03)
+            publisher.stop()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn([AGENT.WORKSPACE_STATUS, "publish", "input-needed",
+                       "--reason", "question", "--pane", "%9"], commands)
+        self.assertTrue(any(command[1:3] == ["heartbeat", "--pane"] for command in commands))
+
     def test_timer_and_activity_stay_on_one_line(self):
         out = io.StringIO()
         size = os.terminal_size((36, 24))
