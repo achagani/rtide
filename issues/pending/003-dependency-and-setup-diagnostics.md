@@ -1,7 +1,7 @@
 # 003: Dependency and setup diagnostics
 
 - Status: proposed
-- Priority rank: 4
+- Priority rank: 7
 - Branch: `issue/003-dependency-and-setup-diagnostics`
 - Worktree: `../rtide-worktrees/003-dependency-and-setup-diagnostics`
 

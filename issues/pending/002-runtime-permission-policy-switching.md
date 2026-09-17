@@ -1,31 +1,40 @@
-# 002: Runtime permission policy switching
+# 002: Live workspace settings and permission reliability
 
 - Status: proposed
-- Priority rank: 3
+- Priority rank: 1
 - Branch: `issue/002-runtime-permission-policy-switching`
 - Worktree: `../rtide-worktrees/002-runtime-permission-policy-switching`
 
 ## Problem
 
-Permission policy is selected at workspace startup, and changing it can disrupt the
-active agent flow or make the effective policy unclear.
+Workspace settings are fragmented across setup, startup prompts, global config,
+workspace config, and runtime commands. The installed `0.2.48` unrestricted startup
+path succeeds, but live agent and permission changes persist desired state without
+reliably changing the running agent because pane discovery parses literal `\t` text
+as real tab delimiters. This can falsely report a security de-escalation.
 
 ## Goal
 
-Let users inspect and safely change the active workspace permission policy while
-preserving their work and requiring explicit confirmation for broader access.
+Provide one in-session settings surface for every startup-configurable option, with
+truthful desired/effective state, safe permission transitions, explicit apply timing,
+verification, rollback, and preserved work.
 
 ## Non-goals
 
 - Circumvent permission controls enforced by an agent harness or host platform.
 - Silently elevate access.
-- Make all harnesses support identical sandbox semantics.
+- Pretend all harnesses support identical sandbox semantics.
+- Apply restart-bound settings silently or lose active conversation state.
+- Replace user-level configuration with workspace-only state.
 
 ## User-facing behavior
 
-The current policy is visible. Selecting a supported replacement applies it to
-subsequent agent work, with confirmation before unrestricted access and an explicit
-message if an agent restart is required.
+From a running workspace, users can open Settings and modify provider, harness, model,
+permission policy, agent height, output width, shell, auto-float, default directory,
+and worktree root where their scope permits. The UI distinguishes desired, effective,
+pending, failed, and restart-required values. Unrestricted startup and live switching
+work with explicit confirmation; unsupported harness capabilities are never presented
+as effective.
 
 ## Dedicated worktree
 
@@ -35,44 +44,64 @@ message if an agent restart is required.
 ## Architecture references
 
 - [`docs/architecture/README.md`](../../docs/architecture/README.md)
-- Add a permission-boundary decision before implementation if policy application or
-  session continuity changes.
+- `docs/architecture/runtime-settings.md` (to be created by this issue)
 
 ## Technical spec
 
-- Treat `workspace`, `observe`, `native`, and `unrestricted` as explicit policies.
-- Expose the effective policy for the active workspace.
-- Persist changes in `.rtide/agent` without losing unrelated provider settings.
-- Require typed confirmation before unrestricted access.
-- Preserve conversation state across any required wrapper restart, or clearly state
-  the limitation when a harness cannot do so.
+- Define one settings schema with type, scope, default, validation, precedence,
+  capability requirements, apply class, verification, and rollback behavior.
+- Represent global desired defaults, workspace desired overrides, and runtime
+  effective state separately.
+- Support explicit apply classes: immediate, next turn, next operation, and
+  restart-required.
+- Fix tmux pane discovery using an unambiguous format/parser contract and verify the
+  effective running agent before reporting success.
+- Treat `workspace`, `observe`, `native`, and `unrestricted` as explicit policies;
+  require typed confirmation before broader access.
+- Declare permission capabilities per harness and reject or label unsupported modes.
+- Parse config as data rather than sourcing arbitrary shell, and write atomically.
+- Preserve conversation state across controlled agent restarts when supported; roll
+  back desired state or report a clear pending/failed state otherwise.
 
 ## Implementation plan
 
-1. Audit current `rtide permissions` behavior for every harness and policy.
-2. Specify continuity and restart semantics.
-3. Implement missing visibility or transition behavior and test the matrix.
+1. Document the settings schema, scopes, precedence, and apply classes.
+2. Fix pane discovery and add effective-state verification for agent changes.
+3. Add one live Settings interface covering all startup-configurable values.
+4. Add per-harness capability handling, rollback, and transition tests.
+5. Reproduce unrestricted startup and live transitions end to end.
 
 ## Acceptance criteria
 
-- [ ] Current policy is visible.
-- [ ] Supported policies can be selected at runtime.
-- [ ] Subsequent tool calls use the new policy.
-- [ ] Broader access requires confirmation.
-- [ ] Existing work continues safely after a switch.
+- [ ] Unrestricted startup reaches a ready workspace after typed confirmation.
+- [ ] The current effective policy and all startup-configurable settings are visible.
+- [ ] Every startup setting can be changed in working mode or clearly marked as
+      restart-required with an explicit apply action.
+- [ ] Supported permission policies apply to subsequent tool calls and are verified
+      against the running agent.
+- [ ] Broader access requires confirmation; unsupported harness policies cannot be
+      displayed as effective.
+- [ ] Failed transitions preserve or restore the previous effective configuration.
+- [ ] Existing conversation and workspace state continue safely after a switch.
+- [ ] Config writes preserve unrelated values and cannot execute shell content.
 
 ## Test plan
 
-- Policy transition matrix for supported harnesses.
-- Tool-command generation and persistence tests.
-- Security review of elevation confirmation.
-- Manual continuity test in an active workspace.
+- Unit tests for settings schema, validation, precedence, and atomic persistence.
+- Pane-discovery regression tests using literal and real delimiter fixtures.
+- Policy and capability matrix for every harness.
+- Runtime tests proving desired and effective values converge or fail visibly.
+- Pseudo-terminal unrestricted startup and active-workspace settings tests.
+- Security review of elevation, rollback, and config parsing.
 
 ## Notes
 
-RTIDE already has a `permissions` command and policy tests, but the roadmap criteria
-were never reverified and the current command may restart the agent pane. Keep this
-issue pending until continuity and effective-policy behavior are proven.
+Installed `0.2.48` fixes the older fzf confirmation exit and unrestricted startup was
+reproduced successfully. The confirmed current defect is live application: tmux emits
+literal `\t` sequences while `awk -F '\t'` expects actual tabs, so the running agent
+is not found or restarted even though `.rtide/agent` changes. Provider, model, and
+permission commands share this risk. `agent_lines` and `tweb_pct` are currently live;
+other settings have mixed or unused behavior that this issue must make explicit.
 
 ## Worktree cleanup checklist
 
