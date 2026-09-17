@@ -145,9 +145,18 @@ run() {
         || { echo "$harness does not support attachments" >&2; return 2; }
       ;;
   esac
+  # `codex exec` accepts --sandbox, but `codex exec resume` rejects it
+  # ("unexpected argument '--sandbox' found"). Resume takes the same policy as a
+  # config override instead, so the sandbox is enforced on resumed turns too.
   case "$permission" in
-    workspace) codex_new_permission='--sandbox workspace-write'; codex_resume_permission='--sandbox workspace-write' ;;
-    observe) codex_new_permission='--sandbox read-only'; codex_resume_permission='--sandbox read-only' ;;
+    workspace)
+      codex_new_permission='--sandbox workspace-write'
+      codex_resume_permission='-c sandbox_mode="workspace-write"'
+      ;;
+    observe)
+      codex_new_permission='--sandbox read-only'
+      codex_resume_permission='-c sandbox_mode="read-only"'
+      ;;
     native) codex_new_permission=''; codex_resume_permission='' ;;
     unrestricted)
       codex_new_permission='--sandbox danger-full-access'

@@ -1,6 +1,6 @@
 # 012: Resumed Codex sandbox and workspace auto-init safety
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/012-resume-sandbox-and-autoinit-safety`
 - Worktree: `../rtide-worktrees/012-resume-sandbox-and-autoinit-safety`
@@ -118,4 +118,40 @@ Reproduced on this host: `codex exec resume --sandbox workspace-write …` →
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/012-resume-sandbox-and-autoinit-safety`,
+branch `issue/012-resume-sandbox-and-autoinit-safety`, as RTIDE 0.2.62.
+
+### Resumed Codex sandbox
+
+`codex exec resume` rejects `--sandbox`, so resumed turns now pass the policy as
+`-c sandbox_mode="workspace-write"` / `-c sandbox_mode="read-only"`.
+`unrestricted` resume keeps `--dangerously-bypass-approvals-and-sandbox`, and
+`native` resume adds no override. Verified end to end: a real Codex session was
+created and then resumed successfully under the workspace and unrestricted
+policies.
+
+### Auto-init and workspace safety
+
+- `rtide_workspace_safe` refuses `$HOME`, any ancestor of `$HOME`, `/`, and
+  filesystem mount roots before creating or writing anything, with an actionable
+  message. RTIDE stores per-workspace state in the workspace, so these can never
+  be workspaces.
+- `rtide_seed_safe` gates project scaffolding so convention files, `.gitignore`,
+  and the memory seed are never written into a broad directory.
+- `rtide_autoinit_safe` runs `git init`/`add -A` only for a small, standalone
+  project directory, refusing existing/nested repositories, workspace
+  containers, and directories above `RTIDE_AUTOINIT_MAX_ENTRIES` (5000). The
+  nested checks use `-mindepth 2` so a workspace's own seeded `.rtide` is not
+  mistaken for a child.
+- The welcome page falls back to `~/.cache/rtide/welcome/` when the workspace
+  cannot be written, so a refused broad directory cannot crash the launcher.
+
+Evidence: this defect created a 5.5 GB `~/.git` (86,353 loose blobs, no commits)
+and thousands of `could not open directory … Permission denied` warnings when
+`$HOME` was opened. That has been removed, and a relaunch of `$HOME` is now
+refused without writing `~/.git`, `~/.tweb`, `~/.gitignore`, or `~/q`. Full
+`make install` suite passed; RTIDE 0.2.62 is the active immutable release. Added
+`tests/test-autoinit-safety.sh` and extended `tests/test-provider.sh` and
+`tests/test-permissions.sh`.
+
+Not yet done: worktree removal and branch deletion.

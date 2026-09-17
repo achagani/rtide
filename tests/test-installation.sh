@@ -59,7 +59,7 @@ grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
   || fail 'development welcome theme is missing'
 grep -F '.rtide/agent-ready' "$ROOT/bin/rtide" >/dev/null \
   || fail 'workspace launcher lacks a stable agent readiness marker'
-convention_seed=$(sed -n '/^# Seed the per-project convention file/,/^mkdir -p "$DIR\/.tweb"/p' "$ROOT/bin/rtide")
+convention_seed=$(sed -n '/^if rtide_seed_safe "\$DIR"; then/,/^  mkdir -p "\$DIR\/.tweb"/p' "$ROOT/bin/rtide")
 grep -F '"$DIR/AGENTS.md"' <<< "$convention_seed" >/dev/null \
   || fail 'workspace launcher does not seed AGENTS.md'
 if grep -F 'CLAUDE.md' <<< "$convention_seed" >/dev/null; then

@@ -69,10 +69,14 @@ Policies have concrete meanings: `workspace` requests workspace-write isolation,
 an RTIDE sandbox claim, and `unrestricted` requests host-level access. Broader
 access requires the exact `UNRESTRICTED` confirmation.
 
-Codex currently enforces all four policies for new and resumed turns. Claude,
-Hermes, and OpenCode are declared `native` only because their current RTIDE
-invocations do not provide equivalent enforceable sandbox controls. Unsupported
-policies are rejected before desired state changes and can never be published as
+Codex currently enforces all four policies for new and resumed turns. New turns
+pass the policy with `--sandbox`; resumed turns cannot, because `codex exec
+resume` rejects that flag, so the same policy is passed as a config override
+(`-c sandbox_mode="…"`). `unrestricted` resume keeps the bypass flag and `native`
+resume adds nothing. Claude, Hermes, and OpenCode are declared `native` only
+because their current RTIDE invocations do not provide equivalent enforceable
+sandbox controls. Unsupported policies are rejected before desired state changes
+and can never be published as
 effective by a settings transition.
 
 ## Security boundaries

@@ -71,3 +71,24 @@ write and updates two tmux window options only on lifecycle events. Each live ag
 does one heartbeat write every 30 seconds. Opening a rail or picker performs one
 `tmux list-windows` call and one bounded pass over small JSON records; the rail does
 not poll while hidden. Stale evaluation occurs during those reads.
+
+## Workspace preparation safety
+
+Opening a workspace prepares a directory: it seeds project scaffolding and, when the
+directory is not already versioned, initializes a Git repository so conversation
+forks have a HEAD. That preparation is bounded by `rtide_seed_safe` and
+`rtide_autoinit_safe`:
+
+- Seeding refuses `$HOME`, any ancestor of `$HOME`, a filesystem mount root, and
+  system directories, so RTIDE never writes its convention files or `.gitignore`
+  into a user's home.
+- Auto-init runs only for a small, standalone project directory. It refuses a
+  directory that is already (or is inside) a repository, one containing nested
+  repositories or another RTIDE workspace, and one whose top-level entry count
+  exceeds `RTIDE_AUTOINIT_MAX_ENTRIES` (default 5000).
+
+When either guard refuses, RTIDE still opens the workspace but reports that it did
+not prepare files or a repository, and fork features report that a repository is
+required. This prevents the broad `git add -A` that previously staged an entire
+home directory — including unreadable system data — when `$HOME` was opened as a
+workspace.

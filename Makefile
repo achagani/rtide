@@ -43,6 +43,7 @@ test: check
 	./tests/test-tui-design.sh
 	./tests/test-review-startup.sh
 	./tests/test-runtime-sockets.sh
+	./tests/test-autoinit-safety.sh
 	./tests/test-fork-snapshot.sh
 	./tests/test-fork-launch-status.sh
 	./tests/test-pane-popup-safety.sh

@@ -416,6 +416,90 @@ enclosing_repository_root() {
   printf '%s\n' "$enclosing"
 }
 
+# Maximum top-level entries RTIDE will stage for an auto-initialized workspace.
+# A directory larger than this is treated as a broad tree, not a project.
+RTIDE_AUTOINIT_MAX_ENTRIES="${RTIDE_AUTOINIT_MAX_ENTRIES:-5000}"
+
+# Whether a directory may be an RTIDE workspace at all. RTIDE writes per-workspace
+# runtime state (.rtide/, .tweb/) into the workspace, so a broad tree such as
+# $HOME, an ancestor of it, a filesystem root, or a mount point must be refused
+# outright rather than partially supported. Returns 0 when the directory is a
+# legitimate workspace root; prints an explanation to stderr when it is not.
+rtide_workspace_safe() {
+  local dir home device parent_device
+  dir=$(realpath -m "${1:?directory required}")
+  home=$(realpath -m "$HOME")
+  if [[ -z "$dir" || "$dir" == / ]]; then
+    printf 'RTIDE: refusing to use / as a workspace; pass a project directory\n' >&2
+    return 1
+  fi
+  if [[ "$dir" == "$home" || "$dir" == "$home/" ]]; then
+    printf 'RTIDE: refusing to use %s (your home directory) as a workspace;\n' "$dir" >&2
+    printf 'RTIDE writes .rtide/ and .tweb/ state there. Pass a project directory instead.\n' >&2
+    return 1
+  fi
+  case "$home/" in
+    "$dir"/*)
+      printf 'RTIDE: refusing to use %s because it contains your home directory;\n' "$dir" >&2
+      printf 'pass the project directory itself.\n' >&2
+      return 1
+      ;;
+  esac
+  device=$(stat -c %d "$dir" 2>/dev/null || true)
+  parent_device=$(stat -c %d "$(dirname "$dir")" 2>/dev/null || true)
+  if [[ -n "$device" && -n "$parent_device" && "$device" != "$parent_device" ]]; then
+    printf 'RTIDE: refusing to use %s because it is a filesystem mount root;\n' "$dir" >&2
+    printf 'pass a project directory on the mount instead.\n' >&2
+    return 1
+  fi
+  return 0
+}
+
+# Whether a directory is safe for RTIDE to write project scaffolding into.
+# RTIDE must never seed into $HOME, an ancestor of $HOME, a mount root, or a
+# system directory. Returns 0 only for an ordinary project directory.
+rtide_seed_safe() {
+  local dir home
+  dir=$(realpath -m "${1:?directory required}")
+  home=$(realpath -m "$HOME")
+  [[ -n "$dir" && "$dir" != / ]] || return 1
+  # $HOME itself, or any ancestor of it (e.g. /home, /).
+  [[ "$dir" != "$home" ]] || return 1
+  case "$home/" in
+    "$dir"/*) return 1 ;;
+  esac
+  # A filesystem mount root is a boundary, not a project.
+  if [[ "$dir" != /*/* ]]; then
+    return 1
+  fi
+  case "$dir" in
+    /home|/root|/usr|/etc|/var|/tmp|/run|/boot|/opt|/srv|/mnt|/media|/lost+found) return 1 ;;
+  esac
+  # Refuse the root of a mounted volume (e.g. /run/media/<user>/<label>).
+  if [[ "$(stat -c %d "$dir" 2>/dev/null)" != "$(stat -c %d "$(dirname "$dir")" 2>/dev/null)" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# Whether RTIDE may auto-initialize a Git repository in this directory. Only a
+# small, self-contained directory with no repository relationship qualifies; a
+# broad or already-repository tree is never staged with `git add -A`.
+rtide_autoinit_safe() {
+  local dir="$1" entries
+  rtide_seed_safe "$dir" || return 1
+  # Already a repository, or inside one (git would resolve a parent).
+  git -C "$dir" rev-parse --show-toplevel >/dev/null 2>&1 && return 1
+  [[ -e "$dir/.git" ]] && return 1
+  # Refuse a workspace container: many siblings or nested repositories. Nested
+  # entries use -mindepth 2 so the directory's own (already seeded) .rtide and
+  # its own top-level .git are not mistaken for children.
+  ( shopt -s nullglob dotglob; entries=("$dir"/*); (( ${#entries[@]} <= RTIDE_AUTOINIT_MAX_ENTRIES )) ) || return 1
+  [[ -z "$(find "$dir" -mindepth 2 -maxdepth 3 -name .git -print -quit 2>/dev/null || true)" ]] || return 1
+  [[ -z "$(find "$dir" -mindepth 2 -maxdepth 3 -name .rtide -type d -print -quit 2>/dev/null || true)" ]] || return 1
+  return 0
+}
+
 fork_running_window() {
   local sess="$1" workspace="$2"
   tmux list-windows -t "$sess" -F '#{window_id} #{@rtide-workspace}' 2>/dev/null \
@@ -2051,35 +2135,50 @@ DIR="${1:-${default_dir:-$(pwd)}}"
 DIR="${DIR/#\~/$HOME}"       # expand a leading ~ (rtide new passes the dir as typed)
 DIR="$(realpath -m "$DIR")"  # absolute — relative dirs otherwise break nvim --listen, session path, welcome page
 
+# Refuse a broad directory before creating or writing anything. RTIDE stores
+# per-workspace state (.rtide/, .tweb/) inside the workspace, so $HOME or a
+# filesystem root must never become one.
+rtide_workspace_safe "$DIR" || exit 2
+
 mkdir -p "$DIR"   # create the workspace dir if it doesn't exist yet
 
-# Seed the per-project convention file (never clobber).
-[[ -f "$DIR/AGENTS.md" ]] || cp "$TWEB_DIR/AGENTS.md" "$DIR/AGENTS.md"
-mkdir -p "$DIR/.tweb"
-[[ -f "$DIR/.tweb/template.html" ]] || cp "$TWEB_DIR/template.html" "$DIR/.tweb/template.html"
-[[ -f "$DIR/.tweb/DESIGN_PLAYBOOK.md" ]] || cp "$TWEB_DIR/DESIGN_PLAYBOOK.md" "$DIR/.tweb/DESIGN_PLAYBOOK.md"
-mkdir -p "$DIR/.tweb/assets"
-if [[ ! -f "$DIR/.tweb/assets/rtide-mark.png" ]]; then
-  [[ -f "$RTIDE_MARK" ]] || { echo "RTIDE asset missing: rtide-mark.png" >&2; exit 1; }
-  cp "$RTIDE_MARK" "$DIR/.tweb/assets/rtide-mark.png"
+# Seed project scaffolding only for an ordinary project directory. RTIDE must
+# never write its convention files, gitignore, or memory seed into $HOME or
+# another broad/system directory.
+if rtide_seed_safe "$DIR"; then
+  # Seed the per-project convention file (never clobber).
+  [[ -f "$DIR/AGENTS.md" ]] || cp "$TWEB_DIR/AGENTS.md" "$DIR/AGENTS.md"
+  mkdir -p "$DIR/.tweb"
+  [[ -f "$DIR/.tweb/template.html" ]] || cp "$TWEB_DIR/template.html" "$DIR/.tweb/template.html"
+  [[ -f "$DIR/.tweb/DESIGN_PLAYBOOK.md" ]] || cp "$TWEB_DIR/DESIGN_PLAYBOOK.md" "$DIR/.tweb/DESIGN_PLAYBOOK.md"
+  mkdir -p "$DIR/.tweb/assets"
+  if [[ ! -f "$DIR/.tweb/assets/rtide-mark.png" ]]; then
+    [[ -f "$RTIDE_MARK" ]] || { echo "RTIDE asset missing: rtide-mark.png" >&2; exit 1; }
+    cp "$RTIDE_MARK" "$DIR/.tweb/assets/rtide-mark.png"
+  fi
+  grep -q '^\.tweb/$' "$DIR/.gitignore" 2>/dev/null || echo '.tweb/' >> "$DIR/.gitignore"
+  grep -q '^exports/$' "$DIR/.gitignore" 2>/dev/null || echo 'exports/' >> "$DIR/.gitignore"
+  grep -q '^\.rtide/\*$' "$DIR/.gitignore" 2>/dev/null || {
+    printf '.rtide/*\n!.rtide/memory/\n!.rtide/memory/**\n' >> "$DIR/.gitignore"
+  }
+  # Seed project memory (committed, like AGENTS.md)
+  mkdir -p "$DIR/.rtide/memory"
+  [[ -f "$DIR/.rtide/memory/MEMORY.md" ]] || echo "# Memory index" > "$DIR/.rtide/memory/MEMORY.md"
+else
+  echo "note: not seeding RTIDE project files in $DIR (broad or system directory)" >&2
 fi
-grep -q '^\.tweb/$' "$DIR/.gitignore" 2>/dev/null || echo '.tweb/' >> "$DIR/.gitignore"
-grep -q '^exports/$' "$DIR/.gitignore" 2>/dev/null || echo 'exports/' >> "$DIR/.gitignore"
-grep -q '^\.rtide/\*$' "$DIR/.gitignore" 2>/dev/null || {
-  printf '.rtide/*\n!.rtide/memory/\n!.rtide/memory/**\n' >> "$DIR/.gitignore"
-}
-# Seed project memory (committed, like AGENTS.md)
-mkdir -p "$DIR/.rtide/memory"
-[[ -f "$DIR/.rtide/memory/MEMORY.md" ]] || echo "# Memory index" > "$DIR/.rtide/memory/MEMORY.md"
 
 # Worktree-backed conversation forks require a repository with a real HEAD.
-# Initialize only standalone directories; never alter the history/config of an
-# existing repository (including a workspace opened from one of its subdirs).
-if ! git -C "$DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+# Initialize only a small, standalone project directory; never alter the
+# history/config of an existing repository, and never stage a broad tree such
+# as $HOME (which would scan the whole home directory with `git add -A`).
+if rtide_autoinit_safe "$DIR"; then
   git -C "$DIR" init -b main >/dev/null
   git -C "$DIR" add -A
   git -C "$DIR" -c user.name=RTIDE -c user.email=rtide@local \
     commit --allow-empty -m "Initialize RTIDE workspace" >/dev/null
+elif ! git -C "$DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "note: $DIR is not Git-initialized; conversation forks stay unavailable here" >&2
 fi
 
 RUNNING_TARGET=$("$RTIDE_LIBEXEC_DIR/workspace-status" list --tsv 2>/dev/null \
@@ -2171,9 +2270,18 @@ TWEB_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')
 tmux set-option -p -t "$TWEB_PANE" @rtide-role tweb
 tmux select-pane -t "$TWEB_PANE" -T output
 # Stable routing for harness command runners that do not inherit TMUX_PANE.
-printf '%s\n' "$TWEB_PANE" > "$DIR/.rtide/tweb-pane"
-# generate the per-workspace welcome page, then open it in tweb
-python3 - "$TWEB_DIR/welcome.html" "$DIR/.tweb/welcome.html" "$S" "$DIR" "$provider" "$harness" "$model" "$DEV_MODE" "$DEV_LABEL" <<'PY'
+mkdir -p "$DIR/.rtide" 2>/dev/null || true
+printf '%s\n' "$TWEB_PANE" > "$DIR/.rtide/tweb-pane" 2>/dev/null || true
+# Generate the per-workspace welcome page, then open it in tweb. When seeding
+# was skipped for a broad directory (e.g. $HOME), fall back to the runtime cache
+# so opening a workspace never depends on writing into that directory.
+welcome_out="$DIR/.tweb/welcome.html"
+if ! mkdir -p "$(dirname "$welcome_out")" 2>/dev/null \
+    || ! : > "$welcome_out" 2>/dev/null; then
+  welcome_out="$HOME/.cache/rtide/welcome/${S}-welcome.html"
+  mkdir -p "$(dirname "$welcome_out")"
+fi
+python3 - "$TWEB_DIR/welcome.html" "$welcome_out" "$S" "$DIR" "$provider" "$harness" "$model" "$DEV_MODE" "$DEV_LABEL" <<'PY'
 import sys, datetime
 tpl, out, ws, path, prov, harness, model, dev_mode, dev_label = sys.argv[1:10]
 html = open(tpl).read()
@@ -2185,7 +2293,7 @@ for k, v in [("{{WORKSPACE}}", ws), ("{{PATH}}", path), ("{{PROVIDER}}", prov),
     html = html.replace(k, v)
 open(out, "w").write(html)
 PY
-tmux send-keys -t "$TWEB_PANE" "tweb open file://$DIR/.tweb/welcome.html" Enter
+tmux send-keys -t "$TWEB_PANE" "tweb open file://$welcome_out" Enter
 find "$DIR/.rtide/agent-ready" -maxdepth 0 -type f -delete 2>/dev/null || true
 
 # TWeb must be connected before the agent accepts a request. Otherwise the
@@ -2197,7 +2305,7 @@ READY_DEADLINE=$((SECONDS + 15))
 while (( SECONDS < READY_DEADLINE )); do
   [[ -n "$(rtide_locate_nvim_socket "$DIR" 2>/dev/null || true)" ]] && READY_NVIM=1
   tweb status --pane "$TWEB_PANE" 2>/dev/null \
-    | grep -Fq "file://$DIR/.tweb/welcome.html" && READY_TWEB=1 || true
+    | grep -Fq "file://$welcome_out" && READY_TWEB=1 || true
   (( READY_NVIM && READY_TWEB )) && break
   sleep 0.1
 done

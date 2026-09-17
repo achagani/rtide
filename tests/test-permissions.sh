@@ -13,12 +13,18 @@ resumed=$($ROOT/libexec/rtide/provider run codex openai test-model prompt sessio
   || fail 'resumed Codex command is not unrestricted'
 default=$($ROOT/libexec/rtide/provider run codex openai test-model prompt)
 [[ "$default" == *'--sandbox workspace-write'* ]] || fail 'default Codex command is not workspace sandboxed'
+# `codex exec resume` rejects --sandbox, so resumed turns pass the policy as a
+# config override. Assert the accepted form and that no bare --sandbox appears.
 resumed_workspace=$($ROOT/libexec/rtide/provider run codex openai test-model prompt session-1 workspace)
-[[ "$resumed_workspace" == *'exec resume --sandbox workspace-write session-1'* ]] \
+[[ "$resumed_workspace" == *'exec resume -c sandbox_mode="workspace-write" session-1'* ]] \
   || fail 'resumed Codex workspace policy is not enforced'
+[[ "$resumed_workspace" != *'resume --sandbox'* ]] \
+  || fail 'resumed Codex command uses unsupported --sandbox'
 resumed_observe=$($ROOT/libexec/rtide/provider run codex openai test-model prompt session-1 observe)
-[[ "$resumed_observe" == *'exec resume --sandbox read-only session-1'* ]] \
+[[ "$resumed_observe" == *'exec resume -c sandbox_mode="read-only" session-1'* ]] \
   || fail 'resumed Codex observe policy is not enforced'
+[[ "$resumed_observe" != *'resume --sandbox'* ]] \
+  || fail 'resumed Codex observe uses unsupported --sandbox'
 
 mkdir -p "$TEST_TMP/workspace/.rtide" "$TEST_TMP/home/.rtide"
 printf 'provider=openai\nharness=codex\nmodel=test-model\n' > "$TEST_TMP/workspace/.rtide/agent"

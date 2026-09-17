@@ -38,4 +38,32 @@ if "$ROOT/libexec/rtide/provider" run opencode openai model prompt '' workspace 
   printf 'FAIL: provider accepted a missing attachment\n' >&2; exit 1
 fi
 
-printf 'PASS: provider attachment capability matrix\n'
+# Codex resume rejects `--sandbox`; the policy must be passed as a config
+# override so resumed turns are still sandboxed.
+for pair in "workspace:sandbox_mode=\"workspace-write\"" "observe:sandbox_mode=\"read-only\""; do
+  policy=${pair%%:*}; expected=${pair#*:}
+  resumed=$("$ROOT/libexec/rtide/provider" run codex openai model prompt session-1 "$policy")
+  [[ "$resumed" == *"exec resume"* ]] \
+    || { printf 'FAIL: %s resume did not resume: %s\n' "$policy" "$resumed" >&2; exit 1; }
+  [[ "$resumed" == *"$expected"* ]] \
+    || { printf 'FAIL: %s resume missing %s: %s\n' "$policy" "$expected" "$resumed" >&2; exit 1; }
+  if [[ "$resumed" == *'--sandbox'* ]]; then
+    printf 'FAIL: %s resume uses unsupported --sandbox: %s\n' "$policy" "$resumed" >&2; exit 1
+  fi
+done
+
+# New (non-resumed) Codex turns still use --sandbox, which `codex exec` accepts.
+fresh=$("$ROOT/libexec/rtide/provider" run codex openai model prompt '' workspace)
+[[ "$fresh" == *'--sandbox workspace-write'* ]] \
+  || { printf 'FAIL: fresh Codex turn lost its sandbox: %s\n' "$fresh" >&2; exit 1; }
+
+# unrestricted resume keeps the bypass flag; native resume adds no override.
+unrestricted=$("$ROOT/libexec/rtide/provider" run codex openai model prompt s1 unrestricted)
+[[ "$unrestricted" == *'--dangerously-bypass-approvals-and-sandbox'* ]] \
+  || { printf 'FAIL: unrestricted resume lost the bypass: %s\n' "$unrestricted" >&2; exit 1; }
+native=$("$ROOT/libexec/rtide/provider" run codex openai model prompt s1 native)
+if [[ "$native" == *'sandbox_mode'* || "$native" == *'--sandbox'* ]]; then
+  printf 'FAIL: native resume added a sandbox override: %s\n' "$native" >&2; exit 1
+fi
+
+printf 'PASS: provider attachment capability and resume sandbox\n'
