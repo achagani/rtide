@@ -23,6 +23,14 @@ disagrees with an issue file, the issue file wins.
 
 Allowed statuses are `proposed`, `in progress`, `blocked`, and `completed`.
 
+## Priority order
+
+Pending product features use a unique positive integer `Priority rank`; lower numbers
+are higher priority. Rank is execution order, not identity: changing priority never
+renames the issue, branch, or worktree. Keep ranks contiguous across the current
+product backlog and update the roadmap view whenever ranking changes. Process and
+housekeeping issues may use `operational` instead of joining the product ranking.
+
 ## Naming and isolation
 
 - Issue file: `issues/pending/NNN-short-slug.md`

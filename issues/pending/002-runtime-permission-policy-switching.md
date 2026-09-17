@@ -1,6 +1,7 @@
 # 002: Runtime permission policy switching
 
 - Status: proposed
+- Priority rank: 3
 - Branch: `issue/002-runtime-permission-policy-switching`
 - Worktree: `../rtide-worktrees/002-runtime-permission-policy-switching`
 

@@ -1,6 +1,7 @@
 # NNN: Short title
 
 - Status: proposed
+- Priority rank: unranked
 - Branch: `issue/NNN-short-slug`
 - Worktree: `../rtide-worktrees/NNN-short-slug`
 
