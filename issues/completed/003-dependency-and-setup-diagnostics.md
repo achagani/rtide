@@ -1,6 +1,6 @@
 # 003: Dependency and setup diagnostics
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/003-dependency-and-setup-diagnostics`
 - Worktree: `../rtide-worktrees/003-dependency-and-setup-diagnostics`
@@ -80,4 +80,26 @@ assuming the historical commits completed this issue.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/003-dependency-and-setup-diagnostics`,
+branch `issue/003-dependency-and-setup-diagnostics`, as RTIDE 0.2.56.
+
+- Added `libexec/rtide/deps`, one canonical matrix classifying every requirement
+  as `required`, `build`, or `optional`, with detection, per-manager host
+  packages, and an actionable remedy (`docs/architecture/dependency-provisioning.md`).
+- `rtide doctor` now renders that matrix, separating `MISSING` blockers from
+  `WARN (optional)` capabilities, printing a remedy for each blocker, and
+  reporting build tools as informational when TWeb is already installed.
+- `scripts/install-deps` requests the exact missing packages for the detected
+  manager from the same matrix, so it cannot provision satisfied or
+  optional-only tools, and still stops with the explicit missing list when no
+  manager is supported.
+- The optional speech engine is a warning, never a blocker; the required agent
+  harness and tweb remain blockers with concrete remediation.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.56 is the active
+immutable release. Added `tests/test-deps.py` (matrix classification, level
+separation, per-manager package selection, install scope, and doctor blocker vs
+optional separation). Existing installation assertions now verify the matrix is
+the single source of truth.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.

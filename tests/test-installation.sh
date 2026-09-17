@@ -165,11 +165,12 @@ grep -F -- '--with-lazyvim' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not expose LazyVim bootstrap'
 grep -F -- '--with-voice' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not expose voice bootstrap'
-grep -F 'LazyVim config' "$ROOT/bin/rtide" >/dev/null \
-  || fail 'doctor does not report LazyVim state'
-grep -F 'speech engine not prepared' "$ROOT/bin/rtide" >/dev/null \
-  || grep -F 'speech engine faster-whisper' "$ROOT/bin/rtide" >/dev/null \
-  || fail 'doctor does not report voice state'
+grep -F 'without-lazyvim' "$ROOT/libexec/rtide/deps" >/dev/null \
+  || fail 'dependency matrix does not report LazyVim state'
+grep -F 'without-voice' "$ROOT/libexec/rtide/deps" >/dev/null \
+  || fail 'dependency matrix does not report voice state'
+grep -F '$DEPS_BIN' "$ROOT/bin/rtide" >/dev/null \
+  || fail 'doctor does not consume the canonical dependency matrix'
 grep -F -- '--without-deps' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not expose dependency opt-out'
 grep -F 'existing Neovim config preserved at' "$ROOT/scripts/install-lazyvim" >/dev/null \
@@ -180,18 +181,20 @@ grep -F 'https://github.com/keyolk/tweb.git' "$ROOT/scripts/install-tweb" >/dev/
   || fail 'TWeb source fallback URL is missing'
 grep -F 'scripts/install-tweb' "$ROOT/install.sh" >/dev/null \
   || fail 'installer does not invoke the TWeb source fallback'
-grep -F 'cargo' "$ROOT/scripts/install-deps" >/dev/null \
-  || fail 'dependency installer does not provision Cargo for TWeb'
+grep -F 'cargo' "$ROOT/libexec/rtide/deps" >/dev/null \
+  || fail 'dependency matrix does not declare Cargo for TWeb'
 for package in atk-devel gtk3-devel webkit2gtk4.1-devel; do
-  grep -F "$package" "$ROOT/scripts/install-deps" >/dev/null \
-    || fail "dependency installer does not provision Fedora TWeb package: $package"
+  grep -F "$package" "$ROOT/libexec/rtide/deps" >/dev/null \
+    || fail "dependency matrix does not declare Fedora TWeb package: $package"
 done
-grep -F 'pkg-config --exists' "$ROOT/scripts/install-deps" >/dev/null \
-  || fail 'dependency installer does not validate native TWeb pkg-config capabilities'
+grep -F 'pkg-config' "$ROOT/libexec/rtide/deps" >/dev/null \
+  || fail 'dependency matrix does not validate native TWeb pkg-config capabilities'
 for capability in atk gtk+-3.0 pango webkit2gtk-4.1; do
-  grep -F "$capability" "$ROOT/scripts/install-deps" >/dev/null \
-    || fail "dependency installer does not validate TWeb capability: $capability"
+  grep -F "$capability" "$ROOT/libexec/rtide/deps" >/dev/null \
+    || fail "dependency matrix does not validate TWeb capability: $capability"
 done
+grep -F 'missing-packages' "$ROOT/scripts/install-deps" >/dev/null \
+  || fail 'dependency installer does not consume the canonical matrix'
 grep -F 'TWeb must be connected before the agent accepts a request' "$ROOT/bin/rtide" >/dev/null \
   || fail 'launcher does not gate the agent on TWeb readiness'
 grep -F 'for _ in range(30)' "$ROOT/libexec/rtide/agent" >/dev/null \

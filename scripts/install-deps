@@ -1,49 +1,31 @@
 #!/usr/bin/env bash
 # Install the host packages RTIDE can provision portably.
+#
+# Package selection comes from the one canonical dependency matrix in
+# libexec/rtide/deps, so installation and `rtide doctor` cannot disagree about
+# what is required, build-time, or optional.
 set -euo pipefail
 
-missing=()
-for command in git tmux nvim fish fzf python3 cargo pkg-config; do
-  command -v "$command" >/dev/null 2>&1 || missing+=("$command")
-done
-if ! command -v kitty >/dev/null 2>&1 && ! command -v ghostty >/dev/null 2>&1; then
-  missing+=(kitty-or-ghostty)
-fi
-if ! command -v pw-record >/dev/null 2>&1 && ! command -v arecord >/dev/null 2>&1 && ! command -v rec >/dev/null 2>&1; then
-  missing+=(audio-recorder)
-fi
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+DEPS="$ROOT/libexec/rtide/deps"
 
-# TWeb's Linux build needs the development metadata, not just the pkg-config
-# executable. A previous early exit treated pkg-config as sufficient and let
-# the later Cargo build fail with missing pango/atk/GTK libraries.
-if [[ "$(uname -s)" == Linux ]] && command -v pkg-config >/dev/null 2>&1; then
-  for capability in atk gtk+-3.0 pango webkit2gtk-4.1; do
-    pkg-config --exists "$capability" || missing+=("pkgconfig:$capability")
-  done
-fi
-if [[ ${#missing[@]} -eq 0 ]]; then
+manager=$("$DEPS" manager)
+missing=$("$DEPS" check 2>/dev/null | awk -F '\t' '$1=="MISSING"{print $4}' || true)
+if [[ -z "$missing" ]]; then
   echo '   supported host dependencies already present'
   exit 0
 fi
-
-manager=''
-for candidate in apt-get dnf brew pacman zypper; do
-  if command -v "$candidate" >/dev/null 2>&1; then manager="$candidate"; break; fi
-done
 [[ -n "$manager" ]] || {
-  echo "   no supported package manager found; missing: ${missing[*]}" >&2
+  echo "   no supported package manager found; missing: $(tr '\n' ' ' <<< "$missing")" >&2
   exit 1
 }
 
-packages=()
-case "$manager" in
-  apt-get) packages=(git tmux neovim fish fzf python3 python3-pip python3-venv cargo pkg-config pipewire pipewire-audio alsa-utils kitty sox libatk1.0-dev libgtk-3-dev libglib2.0-dev libgdk-pixbuf-2.0-dev libcairo2-dev libpango1.0-dev libwebkit2gtk-4.1-dev libxkbcommon-dev) ;;
-  dnf) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pkgconf-pkg-config pipewire-utils alsa-utils kitty sox atk-devel gtk3-devel glib2-devel gdk-pixbuf2-devel cairo-devel pango-devel webkit2gtk4.1-devel libxkbcommon-devel) ;;
-  brew) packages=(git tmux neovim fish fzf python rust pkg-config kitty sox gtk+3 webkitgtk cairo pango atk) ;;
-  pacman) packages=(git tmux neovim fish fzf python python-pip rust pkgconf pipewire pipewire-audio alsa-utils kitty sox atk gtk3 glib2 gdk-pixbuf2 cairo pango webkit2gtk libxkbcommon) ;;
-  zypper) packages=(git tmux neovim fish fzf python3 python3-pip python3-virtualenv cargo pkg-config pipewire alsa-utils kitty sox atk-devel gtk3-devel glib2-devel gdk-pixbuf-devel cairo-devel pango-devel webkit2gtk3-devel libxkbcommon-devel) ;;
-esac
-echo "   installing supported host dependencies with $manager: ${missing[*]}"
+mapfile -t packages < <("$DEPS" missing-packages "$manager")
+[[ ${#packages[@]} -gt 0 ]] || {
+  echo "   no installable host packages for: $(tr '\n' ' ' <<< "$missing")" >&2
+  exit 1
+}
+echo "   installing supported host dependencies with $manager: $(tr '\n' ' ' <<< "$missing")"
 if [[ "$manager" == brew ]]; then
   brew install "${packages[@]}"
 else

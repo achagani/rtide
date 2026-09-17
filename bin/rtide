@@ -36,6 +36,7 @@ source "$RTIDE_LIBEXEC_DIR/ui.sh"
 source "$RTIDE_LIBEXEC_DIR/tweb-common.sh"
 PROVIDER_BIN="$RTIDE_LIBEXEC_DIR/provider"
 SETTINGS_BIN="$RTIDE_LIBEXEC_DIR/settings"
+DEPS_BIN="$RTIDE_LIBEXEC_DIR/deps"
 TWEB_DIR="$RTIDE_ROOT/share"
 RTIDE_MARK="$TWEB_DIR/assets/rtide-mark.png"
 [[ -f "$RTIDE_MARK" ]] || RTIDE_MARK="$RTIDE_ROOT/docs/assets/rtide-mark.png"
@@ -275,51 +276,47 @@ cmd_setup() {
 }
 
 cmd_doctor() {
-  local ok=1 repo outer
-  echo 'core:'
-  for c in tweb tmux nvim; do
-    command -v "$c" >/dev/null 2>&1 || { echo "MISSING: $c"; ok=0; }
-  done
+  local ok=1 repo outer manager
+  manager=$("$DEPS_BIN" manager 2>/dev/null || true)
+  echo "host: ${manager:-no supported package manager}"
+  # One canonical matrix drives both this report and installation provisioning.
+  # Required + build level entries are blockers; optional entries are warnings.
+  command -v python3 >/dev/null 2>&1 || { echo 'MISSING: python3 (required to inspect dependencies)'; return 1; }
+  local tweb_present=0
+  command -v tweb >/dev/null 2>&1 && tweb_present=1
+  local mark level category name detail remedy
+  while IFS=$'\t' read -r mark level category name detail; do
+    case "$mark" in
+      ok)
+        [[ "$level" == optional ]] && echo "optional: $name — $detail"
+        ;;
+      warn)
+        echo "WARN (optional): $name — $detail (non-blocking)"
+        ;;
+      MISSING)
+        remedy=$("$DEPS_BIN" check --json \
+          | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(next((r["remedy"] for r in rows if r["name"]==sys.argv[1]), ""))' "$name")
+        if [[ "$level" == build && $tweb_present -eq 1 ]]; then
+          # Build tools are only needed to build tweb from source; tweb exists.
+          echo "note: $name missing — only needed to build tweb from source"
+        elif [[ "$level" == optional ]]; then
+          echo "WARN (optional): $name — ${remedy:-unavailable}"
+        elif [[ "$level" == build ]]; then
+          echo "MISSING: $name — ${remedy:-required to build tweb}"
+          ok=0
+        else
+          echo "MISSING: $name${detail:+ — $detail}"
+          printf '  remedy: %s\n' "${remedy:-install it}"
+          ok=0
+        fi
+        ;;
+    esac
+  done < <("$DEPS_BIN" check 2>/dev/null)
+
   if command -v tweb >/dev/null 2>&1; then
+    echo 'core:'
     tweb doctor || ok=0
   fi
-  command -v kitty >/dev/null 2>&1 || command -v ghostty >/dev/null 2>&1 \
-    || { echo "MISSING: kitty or ghostty (terminal)"; ok=0; }
-  tmux -V 2>/dev/null | grep -qE '3\.[3-9]' || echo "WARN: tmux < 3.3 (tweb requires 3.3+)"
-  echo 'voice:'
-  if command -v pw-record >/dev/null 2>&1 || command -v arecord >/dev/null 2>&1 || command -v rec >/dev/null 2>&1; then
-    echo 'recorder: available'
-  else
-    echo 'MISSING: pw-record, arecord, or rec (voice input)'; ok=0
-  fi
-  command -v python3 >/dev/null 2>&1 || { echo 'MISSING: python3 (voice input)'; ok=0; }
-  speech_python="$HOME/.rtide/speech-env/bin/python"
-  if [[ -x "$speech_python" ]] && "$speech_python" -c 'import faster_whisper' >/dev/null 2>&1; then
-    echo 'speech engine: faster-whisper ready'
-  else
-    echo 'MISSING: speech engine faster-whisper; rerun install.sh or use --without-voice'; ok=0
-  fi
-  echo 'editor:'
-  nvim_config="${RTIDE_NVIM_CONFIG_DIR:-$HOME/.config/nvim}"
-  if [[ -f "$nvim_config/lua/config/lazy.lua" ]] && grep -Rqs 'LazyVim/LazyVim' "$nvim_config"; then
-    echo 'editor config: LazyVim'
-  elif [[ -d "$nvim_config" ]] && [[ -n "$(find "$nvim_config" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
-    echo 'editor config: existing custom Neovim config'
-  else
-    echo 'MISSING: LazyVim config; rerun install.sh or use --without-lazyvim'; ok=0
-  fi
-  echo 'terminal:'
-  command -v kitty >/dev/null 2>&1 && echo 'terminal: kitty'
-  command -v ghostty >/dev/null 2>&1 && echo 'terminal: ghostty'
-  local found=0
-  echo 'agents:'
-  for a in claude codex hermes opencode; do
-    command -v "$a" >/dev/null 2>&1 && { echo "agent: $a"; found=1; }
-  done
-  [[ $found -eq 0 ]] && { echo "MISSING: no agent (claude/codex/hermes/opencode)"; ok=0; }
-  for s in fish zsh nushell bash; do
-    command -v "$s" >/dev/null 2>&1 && echo "shell: $s"
-  done
   if [[ -f "$CONFIG" ]]; then
     load_config_file "$CONFIG"
     local p="${provider:-}"

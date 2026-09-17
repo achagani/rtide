@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""One canonical dependency matrix for RTIDE installation and diagnostics.
+
+Every requirement RTIDE knows about is defined once here with its level,
+category, accepted commands, host packages per supported manager, and an
+actionable remediation. Installation and `rtide doctor` both consume this data
+so they cannot disagree about what is required, optional, or unsupported.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+
+# level: required (blocks RTIDE), build (needed only to build an optional
+# component), optional (a capability that degrades without it).
+REQUIREMENTS = (
+    {
+        "name": "git", "level": "required", "category": "core",
+        "commands": ["git"],
+        "packages": {"apt-get": ["git"], "dnf": ["git"], "brew": ["git"],
+                     "pacman": ["git"], "zypper": ["git"]},
+        "remedy": "install git with your package manager",
+    },
+    {
+        "name": "tmux", "level": "required", "category": "core",
+        "commands": ["tmux"], "version": {"command": ["tmux", "-V"], "pattern": r"3\.[3-9]"},
+        "packages": {"apt-get": ["tmux"], "dnf": ["tmux"], "brew": ["tmux"],
+                     "pacman": ["tmux"], "zypper": ["tmux"]},
+        "remedy": "install tmux 3.3 or newer",
+    },
+    {
+        "name": "nvim", "level": "required", "category": "core",
+        "commands": ["nvim"],
+        "packages": {"apt-get": ["neovim"], "dnf": ["neovim"], "brew": ["neovim"],
+                     "pacman": ["neovim"], "zypper": ["neovim"]},
+        "remedy": "install Neovim 0.9+",
+    },
+    {
+        "name": "python3", "level": "required", "category": "core",
+        "commands": ["python3"],
+        "packages": {"apt-get": ["python3"], "dnf": ["python3"], "brew": ["python"],
+                     "pacman": ["python"], "zypper": ["python3"]},
+        "remedy": "install Python 3.10+",
+    },
+    {
+        "name": "fzf", "level": "required", "category": "core",
+        "commands": ["fzf"],
+        "packages": {"apt-get": ["fzf"], "dnf": ["fzf"], "brew": ["fzf"],
+                     "pacman": ["fzf"], "zypper": ["fzf"]},
+        "remedy": "install fzf for the searchable pickers",
+    },
+    {
+        "name": "kitty-or-ghostty", "level": "required", "category": "terminal",
+        "commands": ["kitty", "ghostty"],
+        "packages": {"apt-get": ["kitty"], "dnf": ["kitty"], "brew": ["kitty"],
+                     "pacman": ["kitty"], "zypper": ["kitty"]},
+        "remedy": "install kitty or ghostty for terminal graphics",
+    },
+    {
+        "name": "tweb", "level": "required", "category": "tweb",
+        "commands": ["tweb"], "provisioned": "install-tweb",
+        "remedy": "rerun install.sh (scripts/install-tweb builds it from source)",
+    },
+    {
+        "name": "agent", "level": "required", "category": "agent",
+        "commands": ["claude", "codex", "hermes", "opencode"],
+        "remedy": "install one agent harness: claude, codex, hermes, or opencode",
+    },
+    {
+        "name": "shell", "level": "required", "category": "core",
+        "commands": ["fish", "zsh", "nushell", "bash"],
+        "remedy": "install a supported shell (fish, zsh, nushell, or bash)",
+    },
+    {
+        "name": "editor-config", "level": "required", "category": "editor",
+        "kind": "lazyvim", "provisioned": "install-lazyvim",
+        "remedy": "rerun install.sh or pass --without-lazyvim to keep your config",
+    },
+    {
+        "name": "recorder", "level": "optional", "category": "voice",
+        "commands": ["pw-record", "arecord", "rec"],
+        "packages": {"apt-get": ["pipewire", "pipewire-audio", "alsa-utils"],
+                     "dnf": ["pipewire-utils", "alsa-utils"], "brew": ["sox"],
+                     "pacman": ["pipewire", "pipewire-audio", "alsa-utils"],
+                     "zypper": ["pipewire", "alsa-utils"]},
+        "remedy": "install PipeWire/ALSA or sox, or pass --without-voice",
+    },
+    {
+        "name": "speech-engine", "level": "optional", "category": "voice",
+        "kind": "speech", "provisioned": "install-voice",
+        "remedy": "rerun install.sh or pass --without-voice",
+    },
+    # Build-time requirements for RTIDE's optional source installs.
+    {
+        "name": "cargo", "level": "build", "category": "tweb",
+        "commands": ["cargo"],
+        "packages": {"apt-get": ["cargo"], "dnf": ["cargo"], "brew": ["rust"],
+                     "pacman": ["rust"], "zypper": ["cargo"]},
+        "remedy": "install Rust/Cargo to build tweb from source",
+    },
+    {
+        "name": "pkg-config", "level": "build", "category": "tweb",
+        "commands": ["pkg-config"],
+        "packages": {"apt-get": ["pkg-config"], "dnf": ["pkgconf-pkg-config"],
+                     "brew": ["pkg-config"], "pacman": ["pkgconf"],
+                     "zypper": ["pkg-config"]},
+        "remedy": "install pkg-config to build tweb from source",
+    },
+    {
+        "name": "gtk-web-toolkit", "level": "build", "category": "tweb",
+        "kind": "pkgconfig", "pkgconfig": ["atk", "gtk+-3.0", "pango", "webkit2gtk-4.1"],
+        "packages": {
+            "apt-get": ["libatk1.0-dev", "libgtk-3-dev", "libglib2.0-dev",
+                        "libgdk-pixbuf-2.0-dev", "libcairo2-dev", "libpango1.0-dev",
+                        "libwebkit2gtk-4.1-dev", "libxkbcommon-dev"],
+            "dnf": ["atk-devel", "gtk3-devel", "glib2-devel", "gdk-pixbuf2-devel",
+                    "cairo-devel", "pango-devel", "webkit2gtk4.1-devel",
+                    "libxkbcommon-devel"],
+            "brew": ["gtk+3", "webkitgtk", "cairo", "pango", "atk"],
+            "pacman": ["atk", "gtk3", "glib2", "gdk-pixbuf2", "cairo", "pango",
+                       "webkit2gtk", "libxkbcommon"],
+            "zypper": ["atk-devel", "gtk3-devel", "glib2-devel", "gdk-pixbuf-devel",
+                       "cairo-devel", "pango-devel", "webkit2gtk3-devel",
+                       "libxkbcommon-devel"],
+        },
+        "remedy": "install GTK/WebKit development packages to build tweb from source",
+    },
+)
+
+PACKAGE_MANAGERS = ("apt-get", "dnf", "brew", "pacman", "zypper")
+
+
+def _lazyvim_ready() -> bool:
+    config = Path(os.environ.get("RTIDE_NVIM_CONFIG_DIR", Path.home() / ".config" / "nvim"))
+    if not (config / "lua" / "config" / "lazy.lua").is_file():
+        return False
+    for path in config.rglob("*.lua"):
+        try:
+            if "LazyVim/LazyVim" in path.read_text(encoding="utf-8", errors="ignore"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _speech_ready() -> bool:
+    python = Path.home() / ".rtide" / "speech-env" / "bin" / "python"
+    if not python.is_file() or not os.access(python, os.X_OK):
+        return False
+    result = subprocess.run([str(python), "-c", "import faster_whisper"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+
+def _pkgconfig_ready(capabilities) -> bool:
+    if not shutil.which("pkg-config"):
+        return False
+    return all(subprocess.run(["pkg-config", "--exists", item],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+               for item in capabilities)
+
+
+def _version_ok(spec) -> bool:
+    import re
+    result = subprocess.run(spec["command"], capture_output=True, text=True)
+    return bool(re.search(spec["pattern"], result.stdout + result.stderr))
+
+
+def evaluate(requirement: dict) -> dict:
+    """Return the observed state for one requirement."""
+    kind = requirement.get("kind", "command")
+    present = False
+    detail = ""
+    if kind == "command":
+        found = next((c for c in requirement["commands"] if shutil.which(c)), "")
+        present = bool(found)
+        detail = found
+        if present and "version" in requirement:
+            present = _version_ok(requirement["version"])
+            detail = f"{found} ({'ok' if present else 'too old'})"
+    elif kind == "pkgconfig":
+        present = _pkgconfig_ready(requirement["pkgconfig"])
+        detail = "pkg-config capabilities present" if present else "development libraries missing"
+    elif kind == "lazyvim":
+        present = _lazyvim_ready()
+        detail = "LazyVim" if present else "no LazyVim config"
+    elif kind == "speech":
+        present = _speech_ready()
+        detail = "faster-whisper ready" if present else "speech engine missing"
+    return {**{k: requirement[k] for k in ("name", "level", "category")},
+            "present": present, "detail": detail,
+            "remedy": "" if present else requirement.get("remedy", ""),
+            "provisioned": requirement.get("provisioned", "")}
+
+
+def report() -> list[dict]:
+    return [evaluate(r) for r in REQUIREMENTS]
+
+
+def missing_for_install() -> list[str]:
+    """Requirement names that installation can provision from host packages."""
+    result = []
+    for item in report():
+        if item["present"] or item["level"] not in ("required", "build"):
+            continue
+        requirement = next(r for r in REQUIREMENTS if r["name"] == item["name"])
+        if "packages" in requirement:
+            result.append(item["name"])
+    return result
+
+
+def missing_packages(manager: str) -> list[str]:
+    packages: list[str] = []
+    for item in report():
+        if item["present"]:
+            continue
+        requirement = next(r for r in REQUIREMENTS if r["name"] == item["name"])
+        packages.extend(requirement.get("packages", {}).get(manager, []))
+    # de-duplicate while preserving order
+    seen: set[str] = set()
+    return [p for p in packages if not (p in seen or seen.add(p))]
+
+
+def detect_manager() -> str:
+    for candidate in PACKAGE_MANAGERS:
+        if shutil.which(candidate):
+            return candidate
+    return ""
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="rtide deps")
+    sub = parser.add_subparsers(dest="command", required=True)
+    check = sub.add_parser("check")
+    check.add_argument("--json", action="store_true")
+    check.add_argument("--level", choices=("required", "build", "optional"))
+    sub.add_parser("missing-for-install")
+    packages = sub.add_parser("missing-packages")
+    packages.add_argument("manager", nargs="?", default="")
+    sub.add_parser("manager")
+    args = parser.parse_args()
+
+    if args.command == "check":
+        items = report()
+        if args.level:
+            items = [i for i in items if i["level"] == args.level]
+        if args.json:
+            print(json.dumps(items, indent=2))
+        else:
+            for item in items:
+                mark = "ok" if item["present"] else ("MISSING" if item["level"] != "optional" else "warn")
+                line = f"{mark}\t{item['level']}\t{item['category']}\t{item['name']}"
+                if item["detail"]:
+                    line += f"\t{item['detail']}"
+                print(line)
+        return 0
+    if args.command == "missing-for-install":
+        print("\n".join(missing_for_install()))
+        return 0
+    if args.command == "missing-packages":
+        manager = args.manager or detect_manager()
+        if not manager:
+            print("no supported package manager found", file=sys.stderr)
+            return 1
+        print("\n".join(missing_packages(manager)))
+        return 0
+    if args.command == "manager":
+        print(detect_manager())
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
