@@ -105,8 +105,8 @@ https://geminicli.com/docs/reference/keyboard-shortcuts.
 ## Worktree cleanup checklist
 
 - [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/008-rich-input-composer`.
-- [ ] Delete `issue/008-rich-input-composer` safely.
+- [x] Remove `../rtide-worktrees/008-rich-input-composer`.
+- [x] Delete `issue/008-rich-input-composer` safely.
 
 ## Completion notes
 
