@@ -74,8 +74,8 @@ not treated as complete.
 ## Worktree cleanup checklist
 
 - [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/001-review-first-lazyvim-startup`.
-- [ ] Delete `issue/001-review-first-lazyvim-startup` safely.
+- [x] Remove `../rtide-worktrees/001-review-first-lazyvim-startup`.
+- [x] Delete `issue/001-review-first-lazyvim-startup` safely.
 
 ## Completion notes
 
