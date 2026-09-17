@@ -72,9 +72,9 @@ This issue is operational and is not itself part of the ranked product backlog.
 
 ## Worktree cleanup checklist
 
-- [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/007-rank-pending-features`.
-- [ ] Delete `issue/007-rank-pending-features` safely.
+- [x] Integrate and verify the accepted change on `main`.
+- [x] Remove `../rtide-worktrees/007-rank-pending-features`.
+- [x] Delete `issue/007-rank-pending-features` safely.
 
 ## Completion notes
 
@@ -82,3 +82,5 @@ Completed on 2026-09-17. Added priority semantics to the tracker and template,
 assigned unique ranks 1-5 to all pending product features, and reordered the roadmap
 to match. Automated rank, order, local-link, and whitespace checks passed. No runtime
 source or installed payload changed.
+The issue branch was fast-forwarded into `main`, then its worktree and merged branch
+were removed.
