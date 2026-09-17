@@ -1,6 +1,6 @@
 # 008: Rich multiline input composer
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/008-rich-input-composer`
 - Worktree: `../rtide-worktrees/008-rich-input-composer`
@@ -110,4 +110,26 @@ https://geminicli.com/docs/reference/keyboard-shortcuts.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/008-rich-input-composer`, branch
+`issue/008-rich-input-composer`, as RTIDE 0.2.50.
+
+- Added `libexec/rtide/composer.py`: dependency-free bounded raw-terminal editor
+  with cursor/word movement, history, a scrolling viewport capped at eight rows,
+  Ctrl+J and recognized modified-Enter newlines, external-editor handoff, and a
+  non-TTY line fallback.
+- Submissions are immutable `(text, attachments)` values; queue, steer, resend,
+  fork context, history, and provider dispatch all carry the whole submission.
+- Private attachment staging under `.rtide/attachments/<run>/` at mode 0700/0600:
+  signature checks for PNG/JPEG, suffix MIME for text/JSON/XML/PDF, size and count
+  limits, `/attach`, `/attachments`, `/remove`, and clipboard capture via
+  `wl-paste` with an `xclip` fallback. Source files are never deleted.
+- `provider run` validates per-harness capability before emitting a command:
+  Codex `-i`, OpenCode `-f`, Hermes one `--image`, Claude an explicit path block.
+- Fixed a bracketed-paste defect where bytes arriving in the same read as the
+  paste terminator were discarded; a pushback buffer now replays them.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.50 is the active
+immutable release. Composer, provider-capability, agent-status, and PTY tests
+pass, including exact multiline text and paste-plus-modified-Enter.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.
