@@ -59,6 +59,22 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 6. Use `~/rtide/share/template.html` as a technical foundation and the design
    playbook for art direction; adapt both to the subject instead of cloning a theme.
 
+## Issues and architecture
+- Every implementation change starts from an issue/spec in `issues/pending/`, even
+  when the user did not explicitly request one. Reuse an existing issue when its
+  scope and acceptance criteria already cover the work.
+- Use `issues/TEMPLATE.md`, keep the three-digit prefix stable, and move the file to
+  `issues/completed/` only after implementation and verification are complete.
+- Issue specs are canonical for implementation scope, behavior, acceptance criteria,
+  tests, worktree identity, and completion evidence. `docs/roadmap.html` is only a
+  visual index.
+- Read every architecture reference in the issue before implementation. Add or
+  update `docs/architecture/` when work changes durable boundaries, data flows,
+  integrations, constraints, or significant tradeoffs.
+- Start implementation dashboards with the issue path in the objective. Keep local
+  progress and handoff state concise rather than copying the issue or architecture
+  documents into it.
+
 ## Implementation dashboard
 - For every source-changing implementation task, run `rtide progress start` before
   the first source edit. Give it a task-specific title, objective, and meaningful steps.
@@ -94,11 +110,12 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 
 ## Source changes and installation
 - Do feature development in a dedicated sibling Git worktree and branch, not in
-  the primary `~/rtide` checkout. Create one from the primary checkout with
-  `git worktree add ../rtide-<topic> -b <topic-branch> main`, launch RTIDE from
-  that worktree, and keep the primary checkout for release integration,
-  installation, and emergency recovery. Before editing, confirm `git status
-  --short --branch` and `git worktree list` identify the intended worktree.
+  the primary `~/rtide` checkout. Use the issue's stable ID and slug:
+  `git worktree add ../rtide-worktrees/<NNN-slug> -b issue/<NNN-slug> main`.
+  Launch RTIDE from that worktree, and keep the primary checkout for release
+  integration, installation, and emergency recovery. Before editing, confirm
+  `git status --short --branch` and `git worktree list` identify the intended
+  worktree.
 - RTIDE-created conversation forks use the global managed root
   `${XDG_DATA_HOME:-~/.local/share}/rtide/worktrees` (or
   `RTIDE_WORKTREE_ROOT` / `worktree_root` in `~/.rtide/config`) so they cannot
@@ -120,6 +137,9 @@ This workspace is part of **RTIDE** (Rich Terminal IDE): the agent's terminal is
 - Use `make verify-install` to check the installed links without modifying them.
 - Do not report a change as installed unless `make install` completed successfully.
   If only source or tests were changed, state that limitation clearly.
+- After accepted work is integrated and verified on `main`, remove its worktree and
+  delete its issue branch with `git branch -d`. Use `-D` only for accepted squash
+  merges or equivalent integrations Git cannot recognize as merged.
 
 ## Memory (auto)
 - At session start, read the memory index: `rtide memory list` (or read `MEMORY.md`)

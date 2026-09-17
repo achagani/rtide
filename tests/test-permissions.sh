@@ -47,5 +47,8 @@ grep -F 'export RTIDE_ASK="${RTIDE_ASK:-0}"' "$ROOT/scripts/rtide-dev" >/dev/nul
   || fail 'development launcher does not skip the redundant startup agent picker'
 grep -F 'RTIDE_DEV_PERMISSION_CONFIRMED' "$ROOT/bin/rtide" >/dev/null \
   || fail 'agent picker ignores development permission confirmation'
+picker_source=$(sed -n '/^cancellable_input()/,/^# --- commands/p' "$ROOT/bin/rtide")
+[[ $(grep -Fc "enter:accept-or-print-query" <<< "$picker_source") -eq 2 ]] \
+  || fail 'free-form fzf prompts do not accept unmatched values'
 
 printf 'PASS: installed workspaces default safe and development defaults to unrestricted\n'

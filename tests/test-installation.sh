@@ -15,6 +15,7 @@ trap cleanup EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 export HOME="$TEST_TMP/home"
+export XDG_CONFIG_HOME="$HOME/.config"
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export RTIDE_INSTALL_ROOT="$HOME/.local/lib/rtide"
 export RTIDE_BIN_DIR="$HOME/.local/bin"
@@ -58,6 +59,12 @@ grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
   || fail 'development welcome theme is missing'
 grep -F '.rtide/agent-ready' "$ROOT/bin/rtide" >/dev/null \
   || fail 'workspace launcher lacks a stable agent readiness marker'
+convention_seed=$(sed -n '/^# Seed the per-project convention file/,/^mkdir -p "$DIR\/.tweb"/p' "$ROOT/bin/rtide")
+grep -F '"$DIR/AGENTS.md"' <<< "$convention_seed" >/dev/null \
+  || fail 'workspace launcher does not seed AGENTS.md'
+if grep -F 'CLAUDE.md' <<< "$convention_seed" >/dev/null; then
+  fail 'workspace launcher still seeds duplicate CLAUDE.md instructions'
+fi
 if grep -Fq "grep -Fq '● idle'" "$ROOT/bin/rtide"; then
   fail 'workspace launcher still waits for the obsolete idle label'
 fi

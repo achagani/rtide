@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RTIDE Roadmap</title>
+  <style>
+    :root{color-scheme:dark;--bg:#09111a;--ink:#edf4ff;--muted:#9bafc5;--line:#29445e;--cyan:#69dfc2;--amber:#edc56f}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(120deg,#10263b 0,#09111a 42%);color:var(--ink);font:15px/1.55 system-ui,sans-serif}
+    main{max-width:980px;margin:auto;padding:clamp(32px,7vw,78px) 22px}.eyebrow{color:var(--cyan);font:700 11px ui-monospace,monospace;letter-spacing:.15em;text-transform:uppercase}
+    h1{font-size:clamp(38px,7vw,72px);line-height:.98;letter-spacing:-.055em;margin:15px 0}.lead{max-width:700px;color:var(--muted);font-size:18px}
+    .notice{margin:32px 0;border-left:3px solid var(--amber);padding:4px 0 4px 18px;color:var(--muted)}.notice a{color:var(--amber)}
+    ol{list-style:none;padding:0;margin:40px 0}.item{display:grid;grid-template-columns:100px 1fr auto;gap:20px;padding:22px 0;border-top:1px solid var(--line);align-items:start}
+    .id{color:var(--cyan);font:700 12px ui-monospace,monospace}.item h2{font-size:21px;margin:0 0 5px}.item h2 a{color:var(--ink);text-decoration:none}.item h2 a:hover,.item h2 a:focus{color:var(--cyan)}
+    .item p{margin:0;color:var(--muted)}.status{color:var(--amber);font:700 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}
+    @media(max-width:650px){.item{grid-template-columns:70px 1fr}.status{grid-column:2}}
+  </style>
+</head>
+<body><main>
+  <div class="eyebrow">RTIDE roadmap view</div>
+  <h1>Pending work, linked to its source.</h1>
+  <p class="lead">This page is a visual index. Issue files define scope, status, acceptance criteria, and completion evidence.</p>
+  <p class="notice">Canonical tracker: <a href="../issues/README.md">issues/README.md</a>. If this view disagrees with an issue, the issue wins.</p>
+  <ol>
+    <li class="item"><div class="id">RTIDE-001</div><div><h2><a href="../issues/pending/001-review-first-lazyvim-startup.md">Review-first LazyVim startup</a></h2><p>Open with project and Git context before selecting a real file.</p></div><div class="status">Proposed</div></li>
+    <li class="item"><div class="id">RTIDE-002</div><div><h2><a href="../issues/pending/002-runtime-permission-policy-switching.md">Runtime permission policy switching</a></h2><p>Inspect and safely change active workspace permissions.</p></div><div class="status">Proposed</div></li>
+    <li class="item"><div class="id">RTIDE-003</div><div><h2><a href="../issues/pending/003-dependency-and-setup-diagnostics.md">Dependency and setup diagnostics</a></h2><p>Align installation requirements with actionable diagnostics.</p></div><div class="status">Proposed</div></li>
+    <li class="item"><div class="id">RTIDE-004</div><div><h2><a href="../issues/pending/004-tweb-connection-recovery.md">TWeb connection recovery</a></h2><p>Distinguish queued, connected, and visibly acknowledged output.</p></div><div class="status">Proposed</div></li>
+    <li class="item"><div class="id">RTIDE-005</div><div><h2><a href="../issues/pending/005-output-pane-reliability.md">Output-pane reliability</a></h2><p>Keep completed artifacts visible, discoverable, and honestly reported.</p></div><div class="status">Proposed</div></li>
+  </ol>
+</main></body>
+</html>

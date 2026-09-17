@@ -123,6 +123,7 @@ cancellable_input() {
   if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
     result=$(printf '\n' | fzf --print-query --query='' --layout=reverse \
       --border=rounded --height=40% --no-info --prompt="$prompt ❯ " \
+      --bind='enter:accept-or-print-query' \
       --header="Enter = accept${def:+ · default: $def}   Esc = cancel") \
       || { RTIDE_CANCELLED=1; return 130; }
     result=$(printf '%s\n' "$result" | head -1)
@@ -154,7 +155,8 @@ pick() {
       items=("$def")
       for c in "${choices[@]}"; do [[ "$c" != "$def" ]] && items+=("$c"); done
     fi
-    out=$(printf '%s\n' "${items[@]}" | fzf --prompt="$prompt: " --height=40% --border --print-query) \
+    out=$(printf '%s\n' "${items[@]}" | fzf --prompt="$prompt: " --height=40% \
+      --border --print-query --bind='enter:accept-or-print-query') \
       || { RTIDE_CANCELLED=1; return 130; }
     sel=$(printf '%s\n' "$out" | tail -1)
     if printf '%s\n' "${choices[@]}" | grep -Fxq "$sel"; then
@@ -1780,10 +1782,8 @@ DIR="$(realpath -m "$DIR")"  # absolute — relative dirs otherwise break nvim -
 
 mkdir -p "$DIR"   # create the workspace dir if it doesn't exist yet
 
-# Seed per-project convention files (never clobber)
-for f in AGENTS.md CLAUDE.md; do
-  [[ -f "$DIR/$f" ]] || cp "$TWEB_DIR/AGENTS.md" "$DIR/$f"
-done
+# Seed the per-project convention file (never clobber).
+[[ -f "$DIR/AGENTS.md" ]] || cp "$TWEB_DIR/AGENTS.md" "$DIR/AGENTS.md"
 mkdir -p "$DIR/.tweb"
 [[ -f "$DIR/.tweb/template.html" ]] || cp "$TWEB_DIR/template.html" "$DIR/.tweb/template.html"
 [[ -f "$DIR/.tweb/DESIGN_PLAYBOOK.md" ]] || cp "$TWEB_DIR/DESIGN_PLAYBOOK.md" "$DIR/.tweb/DESIGN_PLAYBOOK.md"

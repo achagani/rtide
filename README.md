@@ -250,11 +250,17 @@ from the agent pane, then kills the session (detaching you back to your shell).
 
 ## Conventions
 
-The agent follows the rules in `AGENTS.md` / `CLAUDE.md` (seeded per project, never
+The agent follows the rules in `AGENTS.md` (seeded per project, never
 clobbered): terminal is the input surface (one-line status only), substantive output
 is rendered as HTML in tweb, files it creates or edits are opened in the editor pane
 via `rtide open <path>`, and durable facts are emitted as `MEM: <slug> — <fact>`
 one-liners that the sweep auto-persists to memory.
+
+Implementation work is specified in [`issues/`](issues/README.md). Durable system
+boundaries and decisions live in [`docs/architecture/`](docs/architecture/README.md),
+while [`docs/roadmap.html`](docs/roadmap.html) is a non-canonical visual index. Local
+`rtide progress` dashboards should reference the active issue path rather than repeat
+its full specification.
 
 ## Layout
 
@@ -281,7 +287,7 @@ Source, installed releases, and runtime state are separate.
 └── memory/               # global memory store
 ```
 
-Per-project (seeded automatically): `AGENTS.md`, `CLAUDE.md`, `.tweb/` (gitignored),
+Per-project (seeded automatically): `AGENTS.md`, `.tweb/` (gitignored),
 `.rtide/agent` (per-workspace provider/harness/model override), `.rtide/memory/`
 (committed).
 
@@ -294,13 +300,15 @@ are until stopped and moved with `rtide fork migrate <name>`.
 
 ### Development workflow
 
-For manually managed development checkouts, the conventional Git layout is an
-isolated sibling worktree rather than a checkout nested inside the primary:
+Every implementation issue uses an isolated worktree outside the primary checkout.
+Use the issue's stable numeric prefix and slug for the spec, branch, and path:
 
 ```bash
 cd ~/rtide
-git worktree add ../rtide-my-feature -b my-feature main
-cd ../rtide-my-feature
+mkdir -p ../rtide-worktrees
+git worktree add ../rtide-worktrees/NNN-short-slug \
+  -b issue/NNN-short-slug main
+cd ../rtide-worktrees/NNN-short-slug
 git status --short --branch
 git worktree list
 make dev DIR=.
@@ -309,7 +317,10 @@ make dev DIR=.
 Keep `~/rtide` as the stable release-integration and recovery checkout. Run and
 test the editable source from the feature worktree; merge reviewed work back into
 `main`, then install from the primary checkout. Remove a finished worktree with
-`git worktree remove ../rtide-my-feature` after its branch is merged and clean.
+`git worktree remove ../rtide-worktrees/NNN-short-slug` after its branch is merged
+and clean, then delete the merged branch with `git branch -d issue/NNN-short-slug`.
+Use `-D` only when an accepted squash or equivalent integration prevents Git from
+recognizing the branch as merged.
 
 Run editable source without changing the installed release:
 
