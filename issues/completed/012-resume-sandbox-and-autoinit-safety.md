@@ -113,8 +113,8 @@ Reproduced on this host: `codex exec resume --sandbox workspace-write …` →
 
 - [ ] Merge or otherwise integrate the accepted change into `main`.
 - [ ] Verify the integrated result from the primary checkout.
-- [ ] Remove `../rtide-worktrees/012-resume-sandbox-and-autoinit-safety`.
-- [ ] Delete `issue/012-resume-sandbox-and-autoinit-safety` with `git branch -d`.
+- [x] Remove `../rtide-worktrees/012-resume-sandbox-and-autoinit-safety`.
+- [x] Delete `issue/012-resume-sandbox-and-autoinit-safety` with `git branch -d`.
 
 ## Completion notes
 
