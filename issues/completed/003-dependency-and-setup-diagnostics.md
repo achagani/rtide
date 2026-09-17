@@ -75,8 +75,8 @@ assuming the historical commits completed this issue.
 ## Worktree cleanup checklist
 
 - [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/003-dependency-and-setup-diagnostics`.
-- [ ] Delete `issue/003-dependency-and-setup-diagnostics` safely.
+- [x] Remove `../rtide-worktrees/003-dependency-and-setup-diagnostics`.
+- [x] Delete `issue/003-dependency-and-setup-diagnostics` safely.
 
 ## Completion notes
 
