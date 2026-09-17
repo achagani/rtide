@@ -40,8 +40,14 @@ Use `/steer <message>` to interrupt and resume the same session with new directi
 `/interrupt` to stop, `/resend` to repeat the last message, and `/queue` to inspect
 the queue count (`/help` prints this reminder in the prompt). Pressing `/` on an
 empty prompt opens a selectable command overlay; use Up/Down, Enter, or Escape.
-The prompt is a full line editor: Left/Right, Home/End, Ctrl+Left/Ctrl+Right,
-and insertion in the middle all work. Press `prefix+v` to dictate locally;
+The bounded composer supports cursor movement and multiline drafts without growing
+the tmux pane. Enter sends immediately; Ctrl+J inserts a portable newline, and
+Shift+Enter does the same when the terminal reports modified keys. Ctrl+G round-trips
+the draft through `$VISUAL` or `$EDITOR`. Bracketed text paste preserves newlines.
+Use Alt+V (or `/paste-image`) for a Wayland/X11 PNG/JPEG clipboard, `/attach PATH`
+for a local PNG, JPEG, text, JSON, XML, or PDF file, `/attachments` to inspect, and
+`/remove NUMBER` to remove a staged item. Attachments default to 10 MiB each and are
+validated against the selected harness before a turn starts. Press `prefix+v` to dictate locally;
 speak, press Enter to stop, and the transcript is inserted at the cursor.
 
 ## What you get
@@ -60,7 +66,7 @@ speak, press Enter to stop, and the transcript is inserted at the cursor.
   of a repeated dashboard template; the terminal stays minimal
 - **Welcome screen** — each new workspace opens with a branded welcome page in tweb
   (workspace, provider/harness/model, keybindings)
-- **Agent as an input box** — the agent pane is a pure input line with a one-line
+- **Agent as an input box** — the agent pane is a bounded multiline composer with a one-line
   status; the harness runs non-interactively per request (`claude -p` / `codex exec` /
   `hermes chat -q` / `opencode run`). Every turn opens as its own designed tweb
   result; a separate visual history index links all prior results and custom artifacts

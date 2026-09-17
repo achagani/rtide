@@ -4,7 +4,8 @@
 #   rtide-provider compat-h <harness>                  → providers compatible with harness
 #   rtide-provider env <harness> <provider> <model>    → export/unset lines for the combo
 #   rtide-provider launch <harness> <provider> <model> → full command for the agent pane
-#   rtide-provider run <harness> <provider> <model> <prompt> [session]
+#   rtide-provider run <harness> <provider> <model> <prompt> [session] [permission]
+#                      [--attachment PATH MIME NAME]...
 #                                                     → non-interactive one-shot command
 #   rtide-provider check <provider>                    → auth/health check (exit 0 = OK)
 #   rtide-provider models <provider>                    → available models
@@ -112,7 +113,38 @@ launch() { # $1=harness $2=provider $3=model
 # codex workspace-write sandbox) since there's no interactive prompt.
 run() {
   local harness="$1" provider="$2" model="$3" prompt="$4" session="${5:-}" permission="${6:-workspace}"
-  local q envs cmd codex_new_permission codex_resume_permission
+  local q envs cmd codex_new_permission codex_resume_permission path mime name quoted attachment_args=""
+  local -a attachment_paths=() attachment_mimes=() attachment_names=()
+  if (( $# > 6 )); then shift 6; else set --; fi
+  while (( $# )); do
+    [[ "$1" == "--attachment" && $# -ge 4 ]] \
+      || { echo "invalid attachment arguments" >&2; return 2; }
+    path="$2"; mime="$3"; name="$4"; shift 4
+    [[ -f "$path" && -r "$path" ]] \
+      || { echo "attachment is missing or unreadable: $path" >&2; return 2; }
+    attachment_paths+=("$path"); attachment_mimes+=("$mime"); attachment_names+=("$name")
+  done
+  case "$harness" in
+    codex)
+      for mime in "${attachment_mimes[@]}"; do
+        [[ "$mime" == image/png || "$mime" == image/jpeg ]] \
+          || { echo "codex supports PNG/JPEG attachments only" >&2; return 2; }
+      done
+      ;;
+    hermes)
+      (( ${#attachment_paths[@]} <= 1 )) \
+        || { echo "hermes supports one image attachment per request" >&2; return 2; }
+      for mime in "${attachment_mimes[@]}"; do
+        [[ "$mime" == image/png || "$mime" == image/jpeg ]] \
+          || { echo "hermes supports PNG/JPEG attachments only" >&2; return 2; }
+      done
+      ;;
+    claude|opencode) ;;
+    *)
+      (( ${#attachment_paths[@]} == 0 )) \
+        || { echo "$harness does not support attachments" >&2; return 2; }
+      ;;
+  esac
   case "$permission" in
     workspace) codex_new_permission='--sandbox workspace-write'; codex_resume_permission='--sandbox workspace-write' ;;
     observe) codex_new_permission='--sandbox read-only'; codex_resume_permission='--sandbox read-only' ;;
@@ -123,7 +155,19 @@ run() {
       ;;
     *) echo "unsupported permission policy: $permission" >&2; return 2 ;;
   esac
+  if [[ "$harness" == claude && ${#attachment_paths[@]} -gt 0 ]]; then
+    prompt+=$'\n\nRTIDE attachments (staged local paths):'
+    for path in "${attachment_paths[@]}"; do prompt+=$'\n- '"$path"; done
+  fi
   q=$(printf '%q' "$prompt")
+  for path in "${attachment_paths[@]}"; do
+    quoted=$(printf '%q' "$path")
+    case "$harness" in
+      codex) attachment_args+=" -i $quoted" ;;
+      opencode) attachment_args+=" -f $quoted" ;;
+      hermes) attachment_args+=" --image $quoted" ;;
+    esac
+  done
   envs=$(env_for "$harness" "$provider" "$model")
   case "$harness:$provider" in
     claude:*)
@@ -131,23 +175,23 @@ run() {
       ;;
     codex:openai)
       if [[ -n "$session" ]]; then
-        cmd="codex exec resume $codex_resume_permission $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec resume $codex_resume_permission $session$attachment_args $q --json --skip-git-repo-check -c model_reasoning_effort=none"
       else
-        cmd="codex exec $q --model $model --json $codex_new_permission --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec$attachment_args $q --model $model --json $codex_new_permission --skip-git-repo-check -c model_reasoning_effort=none"
       fi
       ;;
     codex:ollama)
       if [[ -n "$session" ]]; then
-        cmd="codex exec resume $codex_resume_permission $session $q --json --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec resume $codex_resume_permission $session$attachment_args $q --json --skip-git-repo-check -c model_reasoning_effort=none"
       else
-        cmd="codex exec $q --oss --local-provider ollama --model $model --json $codex_new_permission --skip-git-repo-check -c model_reasoning_effort=none"
+        cmd="codex exec$attachment_args $q --oss --local-provider ollama --model $model --json $codex_new_permission --skip-git-repo-check -c model_reasoning_effort=none"
       fi
       ;;
     hermes:*)
-      cmd="hermes chat -q $q -m $model --provider $(hermes_provider "$provider")${session:+ --resume $session}"
+      cmd="hermes chat -q $q -m $model --provider $(hermes_provider "$provider")${session:+ --resume $session}$attachment_args"
       ;;
     opencode:*)
-      cmd="opencode run $q --model $provider/$model${session:+ --session $session}"
+      cmd="opencode run $q --model $provider/$model${session:+ --session $session}$attachment_args"
       ;;
     *)
       echo "unsupported combo: $harness + $provider" >&2

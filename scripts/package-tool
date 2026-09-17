@@ -130,7 +130,7 @@ def verify(payload: Path) -> None:
     if public_entries != ["rtide"]:
         raise SystemExit(f"payload exposes unexpected public commands: {public_entries}")
     required_helpers = (
-        "agent", "dictate", "fork-status", "forks", "mcp", "memory",
+        "agent", "composer.py", "dictate", "fork-status", "forks", "mcp", "memory",
         "memory-index", "open", "pane-popup", "picker.sh", "progress",
         "provider", "render", "run", "settings", "tweb-common.sh",
         "guard-bin/tweb", "uninstall",

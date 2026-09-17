@@ -207,6 +207,7 @@ BASE="$TEST_TMP/build/rtide-$(tr -d '[:space:]' < "$ROOT/VERSION")"
 [[ -x "$BASE/libexec/rtide/picker.sh" ]] || fail 'release payload omitted the shared picker helper'
 [[ -x "$BASE/libexec/rtide/progress" ]] || fail 'release payload omitted implementation dashboard helper'
 [[ -x "$BASE/libexec/rtide/pane-popup" ]] || fail 'release payload omitted pane popup helper'
+[[ -f "$BASE/libexec/rtide/composer.py" ]] || fail 'release payload omitted the input composer module'
 [[ "$(find "$BASE/bin" -mindepth 1 -maxdepth 1 -printf '%f\n')" == rtide ]] \
   || fail 'release payload exposes commands other than rtide'
 grep -F 'helper="$RTIDE_LIBEXEC_DIR/pane-popup"' "$BASE/bin/rtide" >/dev/null \

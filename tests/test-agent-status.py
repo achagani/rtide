@@ -73,10 +73,9 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn("\n╰─❯ ", plain)
         self.assertIn("🎙 voice", plain)
 
-    def test_prompt_uses_readline_line_editor(self):
-        self.assertIn("╰─❯", AGENT.PROMPT)
-        self.assertIn("🎙 voice", AGENT.PROMPT)
-        self.assertTrue(callable(AGENT.readline.redisplay))
+    def test_agent_uses_bounded_composer(self):
+        self.assertTrue(callable(AGENT.Composer.read_submission))
+        self.assertTrue(AGENT.Submission("one line").attachments == ())
 
     def test_development_identity_is_environment_controlled(self):
         with open(AGENT_PATH) as source_file:
@@ -129,26 +128,39 @@ class AgentStatusTests(unittest.TestCase):
         self.assertIn("Send response", page)
 
     def test_live_input_controls(self):
-        self.assertEqual(AGENT.classify_live_input("follow up"),
-                         ("queue", "follow up"))
-        self.assertEqual(AGENT.classify_live_input("/steer focus on maps"),
-                         ("steer", "focus on maps"))
+        action, submission = AGENT.classify_live_input("follow up")
+        self.assertEqual((action, submission.text), ("queue", "follow up"))
+        action, submission = AGENT.classify_live_input("/steer focus on maps")
+        self.assertEqual((action, submission.text), ("steer", "focus on maps"))
         self.assertEqual(AGENT.classify_live_input("/interrupt"),
                          ("interrupt", ""))
-        self.assertEqual(AGENT.classify_live_input("/resend", "last request"),
-                         ("queue", "last request"))
+        last = AGENT.Submission("last request")
+        self.assertEqual(AGENT.classify_live_input("/resend", last),
+                         ("queue", last))
+
+    def test_structured_attachment_metadata_reaches_provider(self):
+        item = AGENT.Attachment("id", "/tmp/image.png", "image.png",
+                                "image/png", 12)
+        request = AGENT.Submission("describe", (item,))
+        completed = mock.Mock(returncode=0, stdout="command\n", stderr="")
+        with mock.patch.object(AGENT.subprocess, "run", return_value=completed) as run:
+            command = AGENT.get_run_cmd("codex", "openai", "model", request, None)
+        self.assertEqual(command, "command")
+        self.assertEqual(run.call_args.args[0][-4:],
+                         ["--attachment", "/tmp/image.png", "image/png", "image.png"])
 
     def test_fork_context_seeds_only_the_first_turn(self):
         with tempfile.TemporaryDirectory() as tmp:
             context = os.path.join(tmp, "fork-context.md")
             with open(context, "w") as f:
                 f.write("Inherited conversation")
-            seeded = AGENT.request_with_fork_context("Continue here", None, context)
-            self.assertIn("Inherited conversation", seeded)
-            self.assertTrue(seeded.endswith("Continue here"))
+            request = AGENT.Submission("Continue here")
+            seeded = AGENT.request_with_fork_context(request, None, context)
+            self.assertIn("Inherited conversation", seeded.text)
+            self.assertTrue(seeded.text.endswith("Continue here"))
             self.assertEqual(
-                AGENT.request_with_fork_context("Next turn", "session-1", context),
-                "Next turn",
+                AGENT.request_with_fork_context(AGENT.Submission("Next turn"), "session-1", context),
+                AGENT.Submission("Next turn"),
             )
 
     def test_fork_command_targets_current_window_with_literal_prompt(self):

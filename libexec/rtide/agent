@@ -8,13 +8,13 @@ designed result with a separate history index in tweb. Files the agent creates/e
 
 Usage: rtide-agent <harness> <provider> <model> <dir> [permission-policy]
 """
+import atexit
 import html as H
 import datetime
 import http.server
 import json
 import os
 import re
-import readline
 import selectors
 import secrets
 import signal
@@ -24,6 +24,9 @@ import sys
 import time
 import threading
 import urllib.parse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from composer import Attachment, AttachmentStore, Composer, Submission
 
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
 RTIDE_ROOT = os.path.realpath(os.environ.get("RTIDE_ROOT", os.path.join(SELF_DIR, "..", "..")))
@@ -49,13 +52,6 @@ VOICE_CONTROL = f"\0337\033[999C\033[10D{MAGENTA}🎙 voice{RESET}\0338"
 PROMPT = (f"\001{ORANGE if DEV_MODE else CYAN}\002╰─❯\001{RESET}\002 "
           f"\001{VOICE_CONTROL}\002")
 PROMPT_PLAIN = "╰─❯ " + VOICE_CONTROL
-
-# Turn input() into a real line editor: cursor movement, word movement, and
-# insertion at the cursor instead of an append/backspace-only cooked line.
-readline.parse_and_bind("set editing-mode emacs")
-readline.parse_and_bind('"\\e[1;5D": backward-word')
-readline.parse_and_bind('"\\e[1;5C": forward-word')
-
 
 def clear():
     # Erase the visible pane and its tmux scrollback so a submitted request
@@ -407,10 +403,12 @@ def error_status(msg):
     status(f"{RED}●{RESET} error: {msg[:100]}")
 
 
-def get_run_cmd(harness, provider, model, prompt, session, permission="workspace"):
+def get_run_cmd(harness, provider, model, submission, session, permission="workspace"):
     """Ask rtide-provider for the non-interactive command for one request."""
-    args = [PROVIDER_BIN, "run", harness, provider, model, prompt]
+    args = [PROVIDER_BIN, "run", harness, provider, model, submission.text]
     args.extend([session or "", permission])
+    for attachment in submission.attachments:
+        args.extend(["--attachment", attachment.path, attachment.mime, attachment.name])
     out = subprocess.run(args, capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip() or "rtide-provider run failed")
@@ -428,7 +426,10 @@ def request_with_fork_context(request, session_id, context_path):
         return request
     if not inherited:
         return request
-    return inherited + "\n\n# New request in this fork\n" + request
+    return Submission(
+        inherited + "\n\n# New request in this fork\n" + request.text,
+        request.attachments,
+    )
 
 
 def parse_line(harness, line):
@@ -493,7 +494,7 @@ def parse_line(harness, line):
     return None, None, None
 
 
-def classify_live_input(line, last_request=""):
+def classify_live_input(line, last_request=None):
     """Classify input entered while a harness turn is active."""
     value = line.strip()
     if not value:
@@ -503,10 +504,10 @@ def classify_live_input(line, last_request=""):
     if value == "/queue":
         return "inspect", ""
     if value == "/resend":
-        return ("queue", last_request) if last_request else ("inspect", "")
+        return ("queue", last_request) if last_request else ("inspect", None)
     if value.startswith("/steer ") and value[7:].strip():
-        return "steer", value[7:].strip()
-    return "queue", value
+        return "steer", Submission(value[7:].strip())
+    return "queue", Submission(value)
 
 
 def stop_process(proc):
@@ -523,7 +524,7 @@ def stop_process(proc):
             pass
 
 
-def run_harness(cmd, harness, on_tool, last_request="", queued_ahead=0):
+def run_harness(cmd, harness, on_tool, last_request=None, queued_ahead=0):
     """Run a harness while accepting queue, steer, and interrupt controls."""
     text_parts = []
     raw_parts = []
@@ -1049,28 +1050,32 @@ def main():
     mark_agent_ready(wdir)
 
     pending = []
-    last_request = ""
+    last_request = None
+    attachment_store = AttachmentStore(wdir)
+    atexit.register(attachment_store.cleanup)
+    composer = Composer(wdir, store=attachment_store)
     while True:
         if pending:
             req = pending.pop(0)
         else:
             try:
-                req = input(PROMPT)
+                req = composer.read_submission()
             except (EOFError, KeyboardInterrupt):
                 clear()
                 status("bye")
                 break
-        req = req.strip()
-        if not req:
+        if req.empty:
             continue
-        if req == "/help":
+        command = req.text.strip()
+        if command == "/help" and not req.attachments:
+            status("Enter send · Ctrl+J/Shift+Enter newline · Ctrl+G editor · Alt+V image · /attach PATH · /attachments · /remove N")
             status("/fork · /fork new PROMPT · /fork resume NAME · /fork stop NAME · /fork status NAME · /fork finish NAME")
             continue
-        if req == "/fork":
+        if command == "/fork" and not req.attachments:
             subprocess.run([RTIDE_BIN, "fork-menu", os.environ.get("TMUX_PANE", "")])
             continue
-        if req.startswith("/fork "):
-            fork_prompt = req[6:].strip()
+        if command.startswith("/fork ") and not req.attachments:
+            fork_prompt = command[6:].strip()
             clear()
             status(f"{MAGENTA}◆{RESET} creating isolated conversation fork…")
             ok, message = fork_command(fork_prompt)
@@ -1081,21 +1086,22 @@ def main():
                 clear()
                 idle_status()
             continue
-        if req == "/queue":
+        if command == "/queue" and not req.attachments:
             status(f"queue: {len(pending)}")
             continue
-        if req == "/interrupt":
+        if command == "/interrupt" and not req.attachments:
             status("interrupt: no active turn")
             continue
-        if req == "/resend":
+        if command == "/resend" and not req.attachments:
             if not last_request:
                 status("resend: no previous message")
                 continue
             req = last_request
-        elif req.startswith("/steer "):
-            req = req[7:].strip()
-            if not req:
+        elif command.startswith("/steer ") and not req.attachments:
+            text = command[7:].strip()
+            if not text:
                 continue
+            req = Submission(text)
 
         clear()
         working_status(elapsed=0, queued=len(pending), reset_prompt=True)
@@ -1144,13 +1150,13 @@ def main():
             stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             result_path = os.path.join(results_dir, f"result-{stamp}.html")
             with open(result_path, "w") as f:
-                f.write(build_result_html(req, response, workspace, dt, reply_endpoint))
+                f.write(build_result_html(req.text, response, workspace, dt, reply_endpoint))
             target = "file://" + os.path.realpath(result_path)
 
         entry = {
-            "request": req,
+            "request": req.text,
             "title": (artifact_title(target) if custom else None)
-                     or result_title(response, req),
+                     or result_title(response, req.text),
             "url": target,
             "elapsed": dt,
             "created": datetime.datetime.now().strftime("%b %d, %Y · %H:%M"),
