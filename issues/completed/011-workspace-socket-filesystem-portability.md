@@ -101,8 +101,8 @@ filesystem.
 
 - [ ] Merge or otherwise integrate the accepted change into `main`.
 - [ ] Verify the integrated result from the primary checkout.
-- [ ] Remove `../rtide-worktrees/011-workspace-socket-filesystem-portability`.
-- [ ] Delete `issue/011-workspace-socket-filesystem-portability` with `git branch -d`.
+- [x] Remove `../rtide-worktrees/011-workspace-socket-filesystem-portability`.
+- [x] Delete `issue/011-workspace-socket-filesystem-portability` with `git branch -d`.
 
 ## Completion notes
 
@@ -129,5 +129,9 @@ Evidence: reproduced on this host — `/run/media/achagani/SharedData` is exFAT 
 the active immutable release. Added `tests/test-runtime-sockets.sh` (placement,
 stability, pointer discovery, stale tolerance, cleanup, and `rtide open`).
 
-Not yet done: live manual verification in the running RTIDE tmux session, plus
-integration into `main`, worktree removal, and branch deletion.
+Live verification: launched a real RTIDE workspace on the exFAT mount in an
+isolated tmux server. The editor started, the socket was live under
+`/run/user/1000/rtide-1000/nvim/`, the pointer recorded it, the fresh buffer was
+unnamed (review-first), and `rtide open <file>` loaded the file into the pane.
+
+Not yet done: worktree removal and branch deletion.
