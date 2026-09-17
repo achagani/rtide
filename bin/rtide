@@ -34,6 +34,7 @@ export RTIDE_ROOT RTIDE_BIN_DIR RTIDE_LIBEXEC_DIR RTIDE_SHARE_DIR
 source "$RTIDE_LIBEXEC_DIR/picker.sh"
 source "$RTIDE_LIBEXEC_DIR/ui.sh"
 source "$RTIDE_LIBEXEC_DIR/tweb-common.sh"
+source "$RTIDE_LIBEXEC_DIR/runtime-paths.sh"
 PROVIDER_BIN="$RTIDE_LIBEXEC_DIR/provider"
 SETTINGS_BIN="$RTIDE_LIBEXEC_DIR/settings"
 DEPS_BIN="$RTIDE_LIBEXEC_DIR/deps"
@@ -77,7 +78,12 @@ RTIDE_REVIEW_LUA="$RTIDE_SHARE_DIR/rtide-review.lua"
 # precedence over the review view.
 rtide_nvim_command() {
   local dir="$1" shell="$2" file="${3:-}"
-  local cmd="SHELL=$shell nvim --listen '$dir/.rtide/nvim.sock'"
+  local socket
+  # Control sockets belong under the runtime root: a workspace may live on a
+  # filesystem that cannot host a Unix domain socket (exFAT/FAT32/network).
+  socket=$(rtide_resolve_nvim_socket "$dir") || socket="$dir/.rtide/nvim.sock"
+  rtide_write_nvim_pointer "$dir" "$socket"
+  local cmd="SHELL=$shell nvim --listen '$socket'"
   if [[ -n "$file" ]]; then
     printf '%s %q\n' "$cmd" "$file"
     return 0
@@ -516,7 +522,7 @@ launch_fork_window() {
   # popup teardown cannot restore the originating window over it.
   deadline=$((SECONDS + 15))
   while (( SECONDS < deadline )); do
-    if (( ! ready_nvim )) && [[ -S "$fork_dir/.rtide/nvim.sock" ]]; then
+    if (( ! ready_nvim )) && [[ -n "$(rtide_locate_nvim_socket "$fork_dir" 2>/dev/null || true)" ]]; then
       ready_nvim=1; printf 'ready=nvim\n' >> "$log_file"
       write_fork_launch_status "$status_file" waiting readiness "$ready_nvim" "$ready_tweb" "$ready_agent" "nvim ready"
     fi
@@ -644,7 +650,7 @@ cmd_fork_manager() {
       [[ -z "$window" ]] || { echo "fork: stop the runtime before repair: $selector" >&2; return 2; }
       find "$path/.rtide/tweb-pane" "$path/.rtide/agent-ready" \
         "$path/.rtide/render-request" -maxdepth 0 -type f -delete 2>/dev/null || true
-      find "$path/.rtide/nvim.sock" -maxdepth 0 -type s -delete 2>/dev/null || true
+      rtide_cleanup_nvim_socket "$path"
       echo "fork: repaired runtime state for $selector; source and history preserved"
       ;;
     migrate)
@@ -911,7 +917,7 @@ PY
   # route its output into fork 1.
   find "$fork_dir/.rtide/tweb-pane" "$fork_dir/.rtide/agent-ready" \
     "$fork_dir/.rtide/render-request" -maxdepth 0 -type f -delete 2>/dev/null || true
-  find "$fork_dir/.rtide/nvim.sock" -maxdepth 0 -type s -delete 2>/dev/null || true
+  rtide_cleanup_nvim_socket "$fork_dir"
 
   untracked=$(git -C "$root" ls-files --others --exclude-standard | head -20 || true)
   [[ -z "$untracked" ]] || printf 'fork note: untracked source files were not copied:\n%s\n' "$untracked" >&2
@@ -1126,6 +1132,13 @@ cmd_quit() {
     exit 1
   fi
   "$RTIDE_LIBEXEC_DIR/memory" sweep "$target" 2>/dev/null || true   # capture pending memories first
+  # Remove every window's runtime control socket and pointer before teardown.
+  local ws_window ws_dir
+  while read -r ws_window; do
+    [[ -n "$ws_window" ]] || continue
+    ws_dir=$(tmux show-options -w -v -t "$ws_window" @rtide-workspace 2>/dev/null || true)
+    [[ -n "$ws_dir" ]] && rtide_cleanup_nvim_socket "$ws_dir"
+  done < <(tmux list-windows -t "$target" -F '#{window_id}' 2>/dev/null || true)
   tmux kill-session -t "$target"
   echo "quit: $target"
   exit 0
@@ -2182,7 +2195,7 @@ printf 'starting %s…\n' "$S"
 READY_NVIM=0 READY_TWEB=0
 READY_DEADLINE=$((SECONDS + 15))
 while (( SECONDS < READY_DEADLINE )); do
-  [[ -S "$DIR/.rtide/nvim.sock" ]] && READY_NVIM=1
+  [[ -n "$(rtide_locate_nvim_socket "$DIR" 2>/dev/null || true)" ]] && READY_NVIM=1
   tweb status --pane "$TWEB_PANE" 2>/dev/null \
     | grep -Fq "file://$DIR/.tweb/welcome.html" && READY_TWEB=1 || true
   (( READY_NVIM && READY_TWEB )) && break

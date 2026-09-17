@@ -1,6 +1,6 @@
 # 011: Workspace socket filesystem portability
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/011-workspace-socket-filesystem-portability`
 - Worktree: `../rtide-worktrees/011-workspace-socket-filesystem-portability`
@@ -106,4 +106,28 @@ filesystem.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/011-workspace-socket-filesystem-portability`,
+branch `issue/011-workspace-socket-filesystem-portability`, as RTIDE 0.2.58.
+
+- Added `libexec/rtide/runtime-paths.sh`: resolves the Neovim control socket
+  under `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/rtide-<uid>/nvim/<workspace-key>.sock`,
+  writes a `.rtide/nvim-socket` pointer file, locates a live socket from either
+  the pointer or a legacy workspace socket, probes whether a directory can bind
+  a socket, and cleans socket plus pointer.
+- `rtide_nvim_command` now uses the resolver; the launcher, fork readiness,
+  `rtide open`, quit, and fork repair/remove all use the shared helpers instead
+  of assuming a workspace-local socket.
+- `rtide open` reads the pointer, so it works from any subdirectory regardless
+  of where the socket lives, and reports a clear error when no live socket
+  exists.
+- Documented the placement and precedence in
+  `docs/architecture/editor-startup.md`.
+
+Evidence: reproduced on this host — `/run/media/achagani/SharedData` is exFAT and
+`bind()` returns `EPERM`; the resolver selects the runtime socket and a real
+`bind()` there succeeds. Full `make install` suite passed and RTIDE 0.2.58 is
+the active immutable release. Added `tests/test-runtime-sockets.sh` (placement,
+stability, pointer discovery, stale tolerance, cleanup, and `rtide open`).
+
+Not yet done: live manual verification in the running RTIDE tmux session, plus
+integration into `main`, worktree removal, and branch deletion.

@@ -31,6 +31,29 @@ The launcher builds the command in `rtide_nvim_command`, which is shared by the
 fresh-workspace and fork launch paths. Explicit-file precedence and the opt-out
 are enforced there, so the review view cannot leak into a direct open.
 
+## Control socket placement
+
+The editor control socket does **not** live in the workspace. `.rtide/nvim.sock`
+inside a project breaks whenever the project is on a filesystem that cannot host
+a Unix domain socket — exFAT, FAT32, and some network mounts, all common for
+removable and shared drives. Neovim then fails with `Failed to --listen:
+operation not permitted` and the editor pane never starts.
+
+`libexec/rtide/runtime-paths.sh` resolves the socket under the per-user runtime
+root:
+
+```
+${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/rtide-<uid>/nvim/<workspace-key>.sock
+```
+
+The workspace keeps a small pointer file, `.rtide/nvim-socket`, recording the
+live path, so `rtide open` and readiness checks remain discoverable from any
+subdirectory without assuming socket placement. Resolution probes the runtime
+root first and only falls back to `.rtide/` when the runtime root itself cannot
+host a socket; if neither can, RTIDE fails with an actionable message instead of
+waiting on a path that can never exist. Quit and fork removal delete the runtime
+socket and pointer.
+
 ## Boundaries
 
 - LazyVim remains the editor configuration; the module adds one entry behavior.
@@ -39,3 +62,5 @@ are enforced there, so the review view cannot leak into a direct open.
   editor.
 - Selecting a file in the explorer is the normal path into editing; tracked
   changed files open through the same explorer and can use LazyVim's Git tooling.
+- Control sockets are runtime state, not project state: they live outside the
+  workspace just like `tweb`'s and `workspace-status`'s sockets already do.

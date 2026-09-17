@@ -42,3 +42,5 @@ Implementation scope and acceptance criteria belong in [`issues/`](../../issues/
 
 - [Runtime settings](runtime-settings.md): desired/effective state, safe persistence,
   apply classes, verified agent transitions, and permission capabilities.
+- [Editor startup](editor-startup.md): review-first entry, session precedence, and
+  runtime control-socket placement for filesystems that cannot host sockets.

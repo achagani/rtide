@@ -8,7 +8,8 @@ BASH_SOURCES := install.sh \
 	libexec/rtide/pane-popup libexec/rtide/picker.sh \
 	libexec/rtide/ui.sh \
 	libexec/rtide/provider libexec/rtide/render libexec/rtide/run \
-	libexec/rtide/tweb-common.sh libexec/rtide/guard-bin/tweb \
+	libexec/rtide/tweb-common.sh libexec/rtide/runtime-paths.sh \
+	libexec/rtide/guard-bin/tweb \
 	libexec/rtide/uninstall \
 	scripts/check-version-bump scripts/install-user scripts/rtide-dev \
 	scripts/rtide-launcher scripts/stage-package scripts/install-deps \
@@ -41,6 +42,7 @@ test: check
 	./tests/test-picker-contract.sh
 	./tests/test-tui-design.sh
 	./tests/test-review-startup.sh
+	./tests/test-runtime-sockets.sh
 	./tests/test-fork-snapshot.sh
 	./tests/test-fork-launch-status.sh
 	./tests/test-pane-popup-safety.sh

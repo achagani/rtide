@@ -133,7 +133,7 @@ def verify(payload: Path) -> None:
         "agent", "composer.py", "dictate", "fork-status", "forks", "mcp", "memory",
         "deps", "memory-index", "open", "pane-popup", "picker.sh", "progress",
         "provider", "render", "run", "settings", "tweb-common.sh",
-        "guard-bin/tweb", "uninstall", "workspace-status",
+        "runtime-paths.sh", "guard-bin/tweb", "uninstall", "workspace-status",
     )
     for asset in ("rtide-review.lua",):
         if not (payload / "share" / asset).is_file():
