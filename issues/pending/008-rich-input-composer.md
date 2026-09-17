@@ -1,7 +1,7 @@
 # 008: Rich multiline input composer
 
 - Status: proposed
-- Priority rank: 2
+- Priority rank: 1
 - Branch: `issue/008-rich-input-composer`
 - Worktree: `../rtide-worktrees/008-rich-input-composer`
 

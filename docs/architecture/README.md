@@ -37,3 +37,8 @@ Implementation scope and acceptance criteria belong in [`issues/`](../../issues/
 ## Decision records
 
 - [0001: Local specification tracking](decisions/0001-local-spec-tracking.md)
+
+## Runtime contracts
+
+- [Runtime settings](runtime-settings.md): desired/effective state, safe persistence,
+  apply classes, verified agent transitions, and permission capabilities.

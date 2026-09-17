@@ -1,7 +1,7 @@
 # 010: Modern fast TUI facelift
 
 - Status: proposed
-- Priority rank: 4
+- Priority rank: 3
 - Branch: `issue/010-modern-tui-facelift`
 - Worktree: `../rtide-worktrees/010-modern-tui-facelift`
 

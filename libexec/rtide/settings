@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""Schema, validation, and safe persistence for RTIDE settings."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import tempfile
+
+
+SCHEMA = {
+    "provider": {"type": "choice", "scope": "global+workspace", "default": "", "choices": ["anthropic", "openai", "ollama"], "apply": "next-turn"},
+    "harness": {"type": "choice", "scope": "global+workspace", "default": "", "choices": ["claude", "codex", "hermes", "opencode"], "apply": "next-turn"},
+    "model": {"type": "string", "scope": "global+workspace", "default": "", "apply": "next-turn"},
+    "permission_policy": {"type": "choice", "scope": "global+workspace", "default": "workspace", "choices": ["workspace", "observe", "native", "unrestricted"], "apply": "next-turn", "confirmation": "UNRESTRICTED"},
+    "agent_lines": {"type": "integer", "scope": "global", "default": "3", "minimum": 1, "apply": "immediate"},
+    "tweb_pct": {"type": "integer", "scope": "global", "default": "60", "minimum": 1, "maximum": 99, "apply": "immediate"},
+    "shell": {"type": "string", "scope": "global", "default": "bash", "apply": "restart-required"},
+    "auto_float": {"type": "boolean", "scope": "global", "default": "false", "apply": "next-operation",
+                   "reserved": "RTIDE never floats output during an agent turn; floating stays an explicit user action, so this preference is stored but not applied automatically."},
+    "default_dir": {"type": "string", "scope": "global", "default": "", "apply": "restart-required"},
+    "worktree_root": {"type": "string", "scope": "global", "default": "", "apply": "restart-required"},
+}
+
+CAPABILITIES = {
+    "codex": ["workspace", "observe", "native", "unrestricted"],
+    "claude": ["native"],
+    "hermes": ["native"],
+    "opencode": ["native"],
+}
+
+
+def read_config(path: Path) -> tuple[dict[str, str], list[str]]:
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return values, []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key in SCHEMA:
+            values[key] = value
+    return values, lines
+
+
+def validate(key: str, value: str) -> str:
+    if key not in SCHEMA:
+        raise ValueError(f"unknown setting: {key}")
+    spec = SCHEMA[key]
+    if "\n" in value or "\r" in value or "\0" in value:
+        raise ValueError(f"{key} contains an invalid control character")
+    if spec["type"] == "choice" and value not in spec["choices"]:
+        if value or key not in {"provider", "harness"}:
+            raise ValueError(f"{key} must be one of: {', '.join(spec['choices'])}")
+    elif spec["type"] == "boolean" and value not in {"true", "false"}:
+        raise ValueError(f"{key} must be true or false")
+    elif spec["type"] == "integer":
+        try:
+            number = int(value)
+        except ValueError as error:
+            raise ValueError(f"{key} must be an integer") from error
+        if number < spec.get("minimum", number) or number > spec.get("maximum", number):
+            raise ValueError(f"{key} is outside its allowed range")
+    return value
+
+
+def assignments(items: list[str]) -> dict[str, str]:
+    result = {}
+    for item in items:
+        key, separator, value = item.partition("=")
+        if not separator or not key:
+            raise ValueError(f"invalid assignment: {item}")
+        result[key] = validate(key, value)
+    return result
+
+
+def atomic_update(path: Path, changes: dict[str, str]) -> None:
+    _, lines = read_config(path)
+    pending = dict(changes)
+    output = []
+    for line in lines:
+        if "=" in line and not line.lstrip().startswith("#"):
+            key = line.split("=", 1)[0].strip()
+            if key in pending:
+                output.append(f"{key}={pending.pop(key)}")
+                continue
+        output.append(line)
+    if not output:
+        output.append("# RTIDE config")
+    output.extend(f"{key}={value}" for key, value in pending.items())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(output) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def resolved(config: Path, workspace: Path) -> dict[str, str]:
+    global_values, _ = read_config(config)
+    workspace_values, _ = read_config(workspace / ".rtide" / "agent")
+    values = {key: str(spec["default"]) for key, spec in SCHEMA.items()}
+    values.update(global_values)
+    values.update(workspace_values)
+    return values
+
+
+def effective(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_effective(path: Path, changes: dict[str, object]) -> None:
+    value = effective(path)
+    value.update(changes)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="rtide settings")
+    parser.add_argument("--config", default=os.path.expanduser("~/.rtide/config"))
+    sub = parser.add_subparsers(dest="command", required=True)
+    schema = sub.add_parser("schema"); schema.add_argument("--json", action="store_true")
+    status = sub.add_parser("status"); status.add_argument("workspace", nargs="?", default="."); status.add_argument("--json", action="store_true")
+    set_cmd = sub.add_parser("set"); set_cmd.add_argument("--scope", choices=("global", "workspace")); set_cmd.add_argument("workspace"); set_cmd.add_argument("assignments", nargs="+")
+    capability = sub.add_parser("capability"); capability.add_argument("harness"); capability.add_argument("policy")
+    publish = sub.add_parser("publish"); publish.add_argument("workspace"); publish.add_argument("assignments", nargs="+"); publish.add_argument("--pid", type=int)
+    verify = sub.add_parser("verify"); verify.add_argument("workspace"); verify.add_argument("assignments", nargs="+"); verify.add_argument("--not-pid", type=int)
+    restore = sub.add_parser("restore-agent"); restore.add_argument("workspace")
+    args = parser.parse_args()
+    config = Path(args.config).expanduser()
+
+    try:
+        if args.command == "schema":
+            payload = {"settings": SCHEMA, "permission_capabilities": CAPABILITIES, "precedence": ["defaults", "global", "workspace", "runtime-effective"]}
+            print(json.dumps(payload, indent=2) if args.json else "\n".join(f"{key}\t{spec['scope']}\t{spec['apply']}" for key, spec in SCHEMA.items()))
+        elif args.command == "status":
+            workspace = Path(args.workspace).resolve()
+            desired = resolved(config, workspace)
+            active = effective(workspace / ".rtide" / "effective-settings.json")
+            rows = []
+            for key, spec in SCHEMA.items():
+                current = str(active.get(key, "unknown"))
+                wanted = desired[key]
+                if "reserved" in spec:
+                    state = "explicit-only"
+                elif current == wanted:
+                    state = "effective"
+                elif spec["apply"] == "restart-required":
+                    state = "restart-required"
+                else:
+                    state = "pending"
+                row = {"key": key, "scope": spec["scope"], "apply": spec["apply"], "desired": wanted, "effective": current, "state": state}
+                if "reserved" in spec:
+                    row["note"] = spec["reserved"]
+                rows.append(row)
+            payload = {"workspace": str(workspace), "settings": rows}
+            if args.json:
+                print(json.dumps(payload, indent=2))
+            else:
+                print("SETTING\tSCOPE\tAPPLY\tDESIRED\tEFFECTIVE\tSTATE")
+                for row in rows:
+                    print("\t".join(str(row[field]) for field in ("key", "scope", "apply", "desired", "effective", "state")))
+                    if "note" in row:
+                        print(f"    note: {row['note']}")
+        elif args.command == "set":
+            workspace = Path(args.workspace).resolve()
+            changes = assignments(args.assignments)
+            for key in changes:
+                declared = SCHEMA[key]["scope"]
+                expected = "workspace" if declared == "global+workspace" else declared
+                scope = args.scope or expected
+                if scope not in declared.split("+"):
+                    raise ValueError(f"{key} has {expected} scope")
+            scopes = {args.scope or ("workspace" if SCHEMA[key]["scope"] == "global+workspace" else SCHEMA[key]["scope"]) for key in changes}
+            if len(scopes) != 1:
+                raise ValueError("assignments span scopes; set global and workspace values separately")
+            scope = scopes.pop()
+            path = config if scope == "global" else workspace / ".rtide" / "agent"
+            atomic_update(path, changes)
+            print(f"settings: saved {scope} desired state in {path}")
+        elif args.command == "capability":
+            if args.policy not in CAPABILITIES.get(args.harness, []):
+                raise ValueError(f"{args.harness} does not enforce permission policy {args.policy}")
+            print(f"{args.harness}:{args.policy}:supported")
+        elif args.command == "publish":
+            changes: dict[str, object] = assignments(args.assignments)
+            if args.pid is not None:
+                changes["agent_pid"] = args.pid
+            write_effective(Path(args.workspace).resolve() / ".rtide" / "effective-settings.json", changes)
+        elif args.command == "verify":
+            active = effective(Path(args.workspace).resolve() / ".rtide" / "effective-settings.json")
+            wanted = assignments(args.assignments)
+            if any(str(active.get(key, "")) != value for key, value in wanted.items()):
+                return 1
+            if args.not_pid is not None and active.get("agent_pid") == args.not_pid:
+                return 1
+        elif args.command == "restore-agent":
+            workspace = Path(args.workspace).resolve()
+            active = effective(workspace / ".rtide" / "effective-settings.json")
+            changes = {key: str(active[key]) for key in ("provider", "harness", "model", "permission_policy") if key in active}
+            if not changes:
+                raise ValueError("no previous effective agent state is available")
+            atomic_update(workspace / ".rtide" / "agent", changes)
+    except ValueError as error:
+        parser.error(str(error))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

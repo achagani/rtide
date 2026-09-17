@@ -132,7 +132,8 @@ def verify(payload: Path) -> None:
     required_helpers = (
         "agent", "dictate", "fork-status", "forks", "mcp", "memory",
         "memory-index", "open", "pane-popup", "picker.sh", "progress",
-        "provider", "render", "run", "tweb-common.sh", "guard-bin/tweb", "uninstall",
+        "provider", "render", "run", "settings", "tweb-common.sh",
+        "guard-bin/tweb", "uninstall",
     )
     missing_helpers = [name for name in required_helpers if not (payload / "libexec" / "rtide" / name).is_file()]
     if missing_helpers:

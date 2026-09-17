@@ -16,7 +16,7 @@ PYTHON_SOURCES := libexec/rtide/agent libexec/rtide/dictate \
  libexec/rtide/output-controls tests/test-output-controls.py \
  scripts/install-tmux tests/test-install-tmux.py \
 	libexec/rtide/fork-status libexec/rtide/forks libexec/rtide/memory-index \
-	libexec/rtide/progress scripts/bump-version scripts/package-tool \
+	libexec/rtide/progress libexec/rtide/settings scripts/bump-version scripts/package-tool \
 	tests/test-agent-status.py tests/test-fork-manager.py tests/test-memory-index.py \
 	tests/test-progress.py
 
@@ -32,6 +32,7 @@ check:
 
 test: check
 	python3 tests/test-output-controls.py
+	python3 tests/test-settings.py
 	python3 tests/test-install-tmux.py
 	./tests/test-picker-contract.sh
 	./tests/test-fork-snapshot.sh

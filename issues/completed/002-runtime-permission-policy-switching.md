@@ -111,4 +111,34 @@ other settings have mixed or unused behavior that this issue must make explicit.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/002-runtime-permission-policy-switching`,
+branch `issue/002-runtime-permission-policy-switching`, as RTIDE 0.2.49.
+
+- Added `libexec/rtide/settings`: one schema, safe non-executing atomic
+  persistence, desired/effective resolution, capability checks, and process
+  published effective state (`docs/architecture/runtime-settings.md`).
+- Replaced every `source "$CONFIG"` with `load_config_file`; partial or
+  hand-edited configs fall back to schema defaults instead of aborting.
+- Fixed pane discovery: tmux now filters `@rtide-role=agent` and each candidate
+  path is queried separately, so literal `\t` and real tabs in paths both work.
+- `rtide agent`, `rtide permissions`, and `rtide settings apply` restart the
+  wrapper and verify a new PID published matching effective state before
+  reporting success; failures roll desired state back to the last effective
+  agent configuration.
+- Added the in-session `rtide settings edit` surface plus `status`, `schema`,
+  `set`, and `apply`; surfaced `settings` in help and the action menu.
+- Declared the per-harness permission capability matrix: codex enforces
+  workspace/observe/native/unrestricted, others are `native` only and cannot be
+  shown as effective for unsupported policies.
+- Made `auto_float` explicitly `explicit-only`, since RTIDE never floats during
+  an agent turn; it is stored but never reported as an applied runtime value.
+- Codex resumed turns now enforce the selected sandbox for `workspace` and
+  `observe`, not only new turns.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.49 is the active
+immutable release. End-to-end unrestricted startup reached a ready workspace
+with `permission_policy=unrestricted` and the agent PID published in
+`.rtide/effective-settings.json`; a non-converging transition test confirmed
+rollback to the previous effective policy.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.

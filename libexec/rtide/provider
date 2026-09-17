@@ -9,6 +9,7 @@
 #   rtide-provider check <provider>                    → auth/health check (exit 0 = OK)
 #   rtide-provider models <provider>                    → available models
 #   rtide-provider matrix                              → compatibility matrix
+#   rtide-provider permissions <harness>               → enforced permission policies
 set -euo pipefail
 
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
@@ -33,6 +34,14 @@ compat_h() { # $1=harness → providers
     hermes)   echo "anthropic openai ollama" ;;
     opencode) echo "anthropic openai ollama" ;;
     *)        echo "" ;;
+  esac
+}
+
+permissions() {
+  case "$1" in
+    codex) echo "workspace observe native unrestricted" ;;
+    claude|hermes|opencode) echo "native" ;;
+    *) echo "" ;;
   esac
 }
 
@@ -105,8 +114,8 @@ run() {
   local harness="$1" provider="$2" model="$3" prompt="$4" session="${5:-}" permission="${6:-workspace}"
   local q envs cmd codex_new_permission codex_resume_permission
   case "$permission" in
-    workspace) codex_new_permission='--sandbox workspace-write'; codex_resume_permission='' ;;
-    observe) codex_new_permission='--sandbox read-only'; codex_resume_permission='' ;;
+    workspace) codex_new_permission='--sandbox workspace-write'; codex_resume_permission='--sandbox workspace-write' ;;
+    observe) codex_new_permission='--sandbox read-only'; codex_resume_permission='--sandbox read-only' ;;
     native) codex_new_permission=''; codex_resume_permission='' ;;
     unrestricted)
       codex_new_permission='--sandbox danger-full-access'
@@ -228,11 +237,12 @@ matrix() {
 case "${1:-}" in
   compat)   shift; compat "$@" ;;
   compat-h) shift; compat_h "$@" ;;
+  permissions) shift; permissions "$@" ;;
   env)      shift; env_for "$@" ;;
   launch)   shift; launch "$@" ;;
   run)      shift; run "$@" ;;
   check)    shift; check "$@" ;;
   models)   shift; models "$@" ;;
   matrix)   matrix ;;
-  *) echo "usage: rtide-provider compat|compat-h|env|launch|run|check|models|matrix"; exit 1 ;;
+  *) echo "usage: rtide-provider compat|compat-h|permissions|env|launch|run|check|models|matrix"; exit 1 ;;
 esac

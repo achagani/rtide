@@ -29,6 +29,7 @@ SELF_DIR = os.path.dirname(os.path.realpath(__file__))
 RTIDE_ROOT = os.path.realpath(os.environ.get("RTIDE_ROOT", os.path.join(SELF_DIR, "..", "..")))
 RTIDE_BIN = os.path.join(RTIDE_ROOT, "bin", "rtide")
 PROVIDER_BIN = os.path.join(SELF_DIR, "provider")
+SETTINGS_BIN = os.path.join(SELF_DIR, "settings")
 TWEB_RENDER = os.path.join(SELF_DIR, "render")
 
 GREEN = "\033[32m"
@@ -339,6 +340,18 @@ def mark_agent_ready(workspace):
     with open(temporary, "w", encoding="utf-8") as handle:
         handle.write(f"{os.getpid()}\n")
     os.replace(temporary, marker)
+
+
+def publish_effective_agent(workspace, harness, provider, model, permission):
+    """Publish the settings this exact wrapper process will enforce."""
+    result = subprocess.run(
+        [SETTINGS_BIN, "publish", workspace, f"harness={harness}",
+         f"provider={provider}", f"model={model}",
+         f"permission_policy={permission}", "--pid", str(os.getpid())],
+        capture_output=True, text=True,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "could not publish effective agent settings")
 
 
 def activity(event=None):
@@ -1031,6 +1044,7 @@ def main():
 
     clear()
     status(f"rtide-agent: {harness} + {provider} ({model})")
+    publish_effective_agent(wdir, harness, provider, model, permission)
     idle_status()
     mark_agent_ready(wdir)
 

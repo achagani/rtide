@@ -34,6 +34,7 @@ export RTIDE_ROOT RTIDE_BIN_DIR RTIDE_LIBEXEC_DIR RTIDE_SHARE_DIR
 source "$RTIDE_LIBEXEC_DIR/picker.sh"
 source "$RTIDE_LIBEXEC_DIR/tweb-common.sh"
 PROVIDER_BIN="$RTIDE_LIBEXEC_DIR/provider"
+SETTINGS_BIN="$RTIDE_LIBEXEC_DIR/settings"
 TWEB_DIR="$RTIDE_ROOT/share"
 RTIDE_MARK="$TWEB_DIR/assets/rtide-mark.png"
 [[ -f "$RTIDE_MARK" ]] || RTIDE_MARK="$RTIDE_ROOT/docs/assets/rtide-mark.png"
@@ -43,6 +44,21 @@ WS_AGENT_FILE=".rtide/agent"   # per-workspace override, relative to the workspa
 SESSION_PREFIX="${RTIDE_SESSION_PREFIX:-rtide-}"
 DEV_MODE="${RTIDE_DEV_MODE:-0}"
 DEV_LABEL="${RTIDE_DEV_LABEL:-DEVELOPMENT}"
+
+# Config files are data, not shell programs. Unknown keys remain available for
+# future versions but are never evaluated by the current process.
+load_config_file() {
+  local file="$1" line key value
+  [[ -r "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    key=${line%%=*}; value=${line#*=}
+    case "$key" in
+      provider|harness|agent|model|permission_policy|default_dir|agent_lines|tweb_pct|nvim_pct|shell|auto_float|worktree_root)
+        printf -v "$key" '%s' "$value" ;;
+    esac
+  done < "$file"
+}
 
 # `RTIDE_CONFIG_DIR` is the authoritative override used by development and
 # isolated tests. Keep the global config path stable when invoking the source
@@ -71,7 +87,7 @@ cmd_help() {
   cat <<'EOF'
 Usage: rtide [command] [arguments]
 
-Workspace:  new, switch, ls, quit, fork, zoom, agent, config, refresh
+Workspace:  new, switch, ls, quit, fork, zoom, agent, config, settings, refresh
 Utilities:  open, progress, memory, mcp, render, run, uninstall
 System:     setup, doctor, auth, matrix, versions, use, version
 
@@ -202,7 +218,10 @@ prompt_selection() {
   # model — default to the current one (free text allowed, so no availability check)
   models=$("$PROVIDER_BIN" models "$PROVIDER")
   MODEL=$(pick "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models) || return $?
-  PERMISSION_POLICY=$(pick "Agent permissions" "$current_permission" workspace observe native unrestricted) || return $?
+  local policies
+  policies=$("$PROVIDER_BIN" permissions "$HARNESS")
+  [[ " $policies " == *" $current_permission "* ]] || current_permission=$(printf '%s' "$policies" | awk '{print $1}')
+  PERMISSION_POLICY=$(pick "Agent permissions" "$current_permission" $policies) || return $?
   if [[ "$PERMISSION_POLICY" == unrestricted \
       && "${RTIDE_DEV_PERMISSION_CONFIRMED:-0}" != 1 ]]; then
     printf 'WARNING: unrestricted agents can read and modify files outside this workspace and access tmux.\n' >&2
@@ -235,19 +254,11 @@ setup_wizard() {
   local auto_float=false
   [[ "$af" =~ ^[yY] ]] && auto_float=true
   mkdir -p "$CONFIG_DIR"
-  cat > "$CONFIG" <<EOF
-# RTIDE config
-provider=$PROVIDER
-harness=$HARNESS
-model=$MODEL
-permission_policy=$PERMISSION_POLICY
-default_dir=$default_dir
-agent_lines=$agent_lines
-tweb_pct=$tweb_pct
-shell=$shell
-auto_float=$auto_float
-worktree_root=
-EOF
+  "$SETTINGS_BIN" --config "$CONFIG" set --scope global "$(pwd)" \
+    "provider=$PROVIDER" "harness=$HARNESS" "model=$MODEL" \
+    "permission_policy=$PERMISSION_POLICY" "default_dir=$default_dir" \
+    "agent_lines=$agent_lines" "tweb_pct=$tweb_pct" "shell=$shell" \
+    "auto_float=$auto_float" "worktree_root=" >/dev/null
   echo "Saved to $CONFIG"
 }
 
@@ -303,7 +314,7 @@ cmd_doctor() {
     command -v "$s" >/dev/null 2>&1 && echo "shell: $s"
   done
   if [[ -f "$CONFIG" ]]; then
-    source "$CONFIG"
+    load_config_file "$CONFIG"
     local p="${provider:-}"
     if [[ -n "$p" ]]; then
       echo "provider: $p"
@@ -425,8 +436,8 @@ launch_fork_window() {
   mkdir -p "$fork_dir/.rtide"
   : > "$log_file"
   write_fork_launch_status "$status_file" starting configure 0 0 0 "Preparing fork runtime"
-  [[ -f "$CONFIG" ]] && source "$CONFIG"
-  [[ -f "$fork_dir/.rtide/agent" ]] && source "$fork_dir/.rtide/agent"
+  load_config_file "$CONFIG"
+  load_config_file "$fork_dir/.rtide/agent"
   harness="${harness:-${agent:-}}"; agent_lines="${agent_lines:-3}"
   permission_policy="${permission_policy:-workspace}"
   tweb_pct="${tweb_pct:-60}"; shell="${shell:-bash}"
@@ -1100,69 +1111,181 @@ cmd_zoom() {
 }
 
 # Re-pick provider/harness/model for a workspace and restart its agent pane.
+find_agent_pane() {
+  local dir="$1" pane path
+  dir=$(realpath -m "$dir")
+  while IFS= read -r pane; do
+    [[ -n "$pane" ]] || continue
+    path=$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null || true)
+    [[ "$(realpath -m "$path")" == "$dir" ]] && { printf '%s\n' "$pane"; return 0; }
+  done < <(tmux list-panes -a -F '#{pane_id}' -f '#{==:#{@rtide-role},agent}' 2>/dev/null || true)
+  return 1
+}
+
+apply_agent_settings() {
+  local dir="$1" ws="$dir/$WS_AGENT_FILE" pane old_pid="" provider harness model permission_policy
+  load_config_file "$CONFIG"
+  load_config_file "$ws"
+  harness="${harness:-${agent:-}}"; permission_policy="${permission_policy:-workspace}"
+  "$SETTINGS_BIN" capability "$harness" "$permission_policy" >/dev/null || return
+  pane=$(find_agent_pane "$dir" || true)
+  if [[ -z "$pane" ]]; then
+    echo "settings: desired agent state saved; apply pending until workspace startup"
+    return 0
+  fi
+  old_pid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("agent_pid", ""))' \
+    "$dir/.rtide/effective-settings.json" 2>/dev/null || true)
+  tmux send-keys -t "$pane" C-c
+  tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir $permission_policy" Enter
+  for _ in $(seq 1 50); do
+    if "$SETTINGS_BIN" verify "$dir" "provider=$provider" "harness=$harness" "model=$model" \
+        "permission_policy=$permission_policy" ${old_pid:+--not-pid "$old_pid"}; then
+      echo "settings: verified running agent in $pane ($harness/$provider, $permission_policy)"
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "settings: transition failed verification; restoring previous effective agent state" >&2
+  "$SETTINGS_BIN" restore-agent "$dir" || return 1
+  unset provider harness agent model permission_policy
+  load_config_file "$CONFIG"; load_config_file "$ws"
+  harness="${harness:-${agent:-}}"; permission_policy="${permission_policy:-workspace}"
+  tmux send-keys -t "$pane" C-c
+  tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir $permission_policy" Enter
+  return 1
+}
+
 cmd_agent() {
   local dir="${2:-$(pwd)}"
-  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  load_config_file "$CONFIG"
   local ws="$dir/$WS_AGENT_FILE"
-  [[ -f "$ws" ]] && source "$ws"
+  load_config_file "$ws"
   prompt_selection "${provider:-}" "${harness:-${agent:-}}" "${model:-}" "${permission_policy:-workspace}"
   provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"; permission_policy="$PERMISSION_POLICY"
-  mkdir -p "$(dirname "$ws")"
-  cat > "$ws" <<EOF
-provider=$provider
-harness=$harness
-model=$model
-permission_policy=$permission_policy
-EOF
-  echo "agent: $harness + $provider ($model), permissions=$permission_policy for $dir"
-  local pane
-  pane=$(tmux list-panes -a -F '#{pane_id}\t#{@rtide-role}\t#{pane_current_path}' 2>/dev/null \
-    | awk -F '\t' -v d="$(realpath -m "$dir")" '$2=="agent" && $3==d{print $1; exit}')
-  if [[ -n "$pane" ]]; then
-    tmux send-keys -t "$pane" C-c
-    tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir $permission_policy" Enter
-    echo "restarted agent pane $pane"
-  fi
+  "$SETTINGS_BIN" --config "$CONFIG" set --scope workspace "$dir" \
+    "provider=$provider" "harness=$harness" "model=$model" "permission_policy=$permission_policy" >/dev/null
+  echo "agent: desired $harness + $provider ($model), permissions=$permission_policy for $dir"
+  apply_agent_settings "$(realpath -m "$dir")"
   exit 0
 }
 
 cmd_permissions() {
-  local policy="${2:-}" dir="${3:-$(pwd)}" ws tmp pane provider harness model permission_policy
+  local policy="${2:-}" dir="${3:-$(pwd)}" ws harness
   [[ "$policy" =~ ^(workspace|observe|native|unrestricted)$ ]] \
     || { echo "usage: rtide permissions workspace|observe|native|unrestricted [directory]" >&2; exit 2; }
   dir=$(realpath -m "$dir")
   ws="$dir/$WS_AGENT_FILE"
   [[ -f "$ws" ]] || { echo "permissions: no workspace agent config at $ws" >&2; exit 1; }
+  load_config_file "$ws"
+  harness="${harness:-${agent:-}}"
+  "$SETTINGS_BIN" capability "$harness" "$policy" >/dev/null || exit $?
   if [[ "$policy" == unrestricted ]]; then
     printf 'WARNING: unrestricted agents can access tmux and read or modify files outside %s.\n' "$dir" >&2
     [[ "${RTIDE_CONFIRM_UNRESTRICTED:-}" == UNRESTRICTED ]] \
       || { echo "permissions: rerun with RTIDE_CONFIRM_UNRESTRICTED=UNRESTRICTED" >&2; exit 2; }
   fi
-  tmp="$ws.tmp"
-  awk -v value="$policy" '
-    BEGIN { found=0 }
-    /^permission_policy=/ { print "permission_policy=" value; found=1; next }
-    { print }
-    END { if (!found) print "permission_policy=" value }
-  ' "$ws" > "$tmp"
-  mv "$tmp" "$ws"
-  printf 'permissions: %s for %s\n' "$policy" "$dir"
-  pane=$(tmux list-panes -a -F '#{pane_id}\t#{@rtide-role}\t#{pane_current_path}' 2>/dev/null \
-    | awk -F '\t' -v d="$dir" '$2=="agent" && $3==d{print $1; exit}' || true)
-  if [[ -n "$pane" ]]; then
-    source "$ws"
-    harness="${harness:-${agent:-}}"
-    tmux send-keys -t "$pane" C-c
-    tmux send-keys -t "$pane" "$RTIDE_AGENT_CMD $harness $provider $model $dir $permission_policy" Enter
-    echo "permissions: restarted agent pane $pane"
-  else
-    echo "permissions: takes effect when this workspace agent next starts"
-  fi
+  "$SETTINGS_BIN" --config "$CONFIG" set --scope workspace "$dir" "permission_policy=$policy" >/dev/null
+  printf 'permissions: desired %s for %s\n' "$policy" "$dir"
+  apply_agent_settings "$dir"
+  exit 0
+}
+
+# One interactive, in-session surface for every startup-configurable setting.
+# It shows desired/effective/pending state, persists desired state safely, and
+# applies or explicitly defers each change according to its apply class.
+settings_field() { # $1=key $2=field  (from the schema JSON)
+  "$SETTINGS_BIN" --config "$CONFIG" schema --json \
+    | python3 -c 'import json,sys; s=json.load(sys.stdin)["settings"].get(sys.argv[1],{}); v=s.get(sys.argv[2],""); print(" ".join(map(str,v)) if isinstance(v,list) else v)' \
+      "$1" "$2"
+}
+
+settings_edit() {
+  local dir="$1" key spec_scope spec_apply current choice value confirm scope desired effective state
+  dir=$(realpath -m "$dir")
+  while :; do
+    "$SETTINGS_BIN" --config "$CONFIG" status "$dir"
+    key=$(pick "Setting to change (Esc to finish)" "" \
+      provider harness model permission_policy agent_lines tweb_pct shell auto_float default_dir worktree_root) \
+      || { echo "settings: closed"; return 0; }
+    [[ -n "$key" ]] || { echo "settings: closed"; return 0; }
+    spec_scope=$(settings_field "$key" scope)
+    spec_apply=$(settings_field "$key" apply)
+    current=$("$SETTINGS_BIN" --config "$CONFIG" status "$dir" --json 2>/dev/null \
+      | python3 -c 'import json,sys
+try:
+    rows = json.load(sys.stdin)["settings"]
+    print(next(r["desired"] for r in rows if r["key"] == sys.argv[1]))
+except (ValueError, KeyError, StopIteration):
+    print("")' "$key") || current=""
+    choice=$(settings_field "$key" choices)
+    if [[ -n "$choice" ]]; then
+      value=$(pick "$key" "$current" $choice) || continue
+    else
+      value=$(cancellable_input "$key" "$current") || continue
+    fi
+    if [[ "$key" == permission_policy && "$value" == unrestricted ]]; then
+      printf 'WARNING: unrestricted agents can access tmux and read or modify files outside %s.\n' "$dir" >&2
+      confirm=$(cancellable_input "Type UNRESTRICTED to confirm" "") || continue
+      [[ "$confirm" == UNRESTRICTED ]] || { echo "settings: unrestricted not enabled" >&2; continue; }
+    fi
+    # global+workspace keys are per-workspace here; global-only keys stay global.
+    if [[ "$spec_scope" == "global+workspace" ]]; then scope=workspace; else scope=global; fi
+    if ! "$SETTINGS_BIN" --config "$CONFIG" set --scope "$scope" "$dir" "$key=$value"; then
+      echo "settings: could not save '$key=$value'" >&2
+      continue
+    fi
+    case "$spec_apply" in
+      immediate)
+        local window
+        window=$(tmux display-message -p '#{window_id}' 2>/dev/null || true)
+        [[ -z "$window" ]] || "$0" refresh-window "$window" >/dev/null 2>&1 || true
+        echo "settings: applied $key=$value to the active layout"
+        ;;
+      next-turn)
+        apply_agent_settings "$dir" || echo "settings: $key saved; apply will retry at next start" >&2
+        ;;
+      *)
+        echo "settings: $key=$value saved; $spec_apply"
+        ;;
+    esac
+  done
+}
+
+cmd_settings() {
+  local sub="${2:-status}" dir confirm
+  case "$sub" in
+    schema) shift 2; exec "$SETTINGS_BIN" --config "$CONFIG" schema "$@" ;;
+    status) dir="${3:-$(pwd)}"; exec "$SETTINGS_BIN" --config "$CONFIG" status "$dir" "${@:4}" ;;
+    set)
+      shift 2
+      exec "$SETTINGS_BIN" --config "$CONFIG" set "$@"
+      ;;
+    edit)
+      dir="${3:-$(pwd)}"; settings_edit "$dir"
+      ;;
+    apply)
+      dir="${3:-$(pwd)}"; dir=$(realpath -m "$dir")
+      unset provider harness agent model permission_policy
+      load_config_file "$CONFIG"; load_config_file "$dir/$WS_AGENT_FILE"
+      harness="${harness:-${agent:-}}"; permission_policy="${permission_policy:-workspace}"
+      if [[ "$permission_policy" == unrestricted ]]; then
+        confirm="${RTIDE_CONFIRM_UNRESTRICTED:-}"
+        [[ "$confirm" == UNRESTRICTED ]] || { echo "settings: apply requires RTIDE_CONFIRM_UNRESTRICTED=UNRESTRICTED" >&2; exit 2; }
+      fi
+      apply_agent_settings "$dir"
+      local pane window
+      pane=$(find_agent_pane "$dir" 2>/dev/null || true)
+      window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
+      # Layout refresh is best-effort here; agent verification remains authoritative.
+      [[ -z "$window" ]] || "$0" refresh-window "$window" >/dev/null 2>&1 || true
+      ;;
+    *) echo "usage: rtide settings [status [dir]|schema|edit [dir]|set [--scope SCOPE] dir key=value...|apply [dir]]" >&2; exit 2 ;;
+  esac
   exit 0
 }
 
 cmd_auth() {
-  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  load_config_file "$CONFIG"
   local p="${2:-${provider:-}}"
   [[ -n "$p" ]] || { echo "no provider configured — run 'rtide setup' or 'rtide agent'"; exit 1; }
   local rc=0
@@ -1172,18 +1295,14 @@ cmd_auth() {
 
 # --- config & refresh -------------------------------------------------------
 
-CONFIG_KEYS="provider harness model default_dir agent_lines tweb_pct shell auto_float worktree_root"
+CONFIG_KEYS="provider harness model permission_policy default_dir agent_lines tweb_pct shell auto_float worktree_root"
 
 # Rewrite ~/.rtide/config from the current shell vars (only known keys).
 write_global_config() {
-  local key
+  local key args=()
   worktree_root="${worktree_root:-}"
-  {
-    echo "# RTIDE config"
-    for key in $CONFIG_KEYS; do
-      echo "$key=${!key}"
-    done
-  } > "$CONFIG"
+  for key in $CONFIG_KEYS; do args+=("$key=${!key:-}"); done
+  "$SETTINGS_BIN" --config "$CONFIG" set --scope global "$(pwd)" "${args[@]}" >/dev/null
 }
 
 # View / edit / reset the global config (source of truth for layout; the combo
@@ -1193,15 +1312,24 @@ write_global_config() {
 #   rtide config reset [layout|agent|all] → restore built-in defaults (default: layout)
 cmd_config() {
   local sub="${2:-}" key val scope def
-  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  load_config_file "$CONFIG"
+  # A partial config file (or a hand-edited one) must never abort the display
+  # with an unbound variable. Missing keys fall back to their schema defaults.
+  provider="${provider:-}"; harness="${harness:-${agent:-}}"; model="${model:-}"
+  permission_policy="${permission_policy:-workspace}"
+  agent_lines="${agent_lines:-3}"
   tweb_pct="${tweb_pct:-${nvim_pct:-60}}"
+  shell="${shell:-$(command -v fish >/dev/null 2>&1 && echo fish || echo bash)}"
+  auto_float="${auto_float:-false}"
+  default_dir="${default_dir:-}"
   worktree_root="${worktree_root:-}"
   case "$sub" in
     "")
       printf 'agent  %-12s %s\n' provider "$provider"
       printf 'agent  %-12s %s\n' harness "$harness"
       printf 'agent  %-12s %s\n' model "$model"
-      printf 'layout %-12s %s\n' agent_lines "${agent_lines:-3}"
+      printf 'agent  %-12s %s\n' permission_policy "$permission_policy"
+      printf 'layout %-12s %s\n' agent_lines "$agent_lines"
       printf 'layout %-12s %s\n' tweb_pct "$tweb_pct"
       printf 'layout %-12s %s\n' shell "$shell"
       printf 'layout %-12s %s\n' auto_float "$auto_float"
@@ -1216,6 +1344,9 @@ cmd_config() {
         [[ "$key" == "$kv" || -z "$key" ]] && { echo "config error: bad assignment '$kv' (want key=value)" >&2; exit 1; }
         case "$key" in
           provider|harness|model|default_dir|shell|worktree_root) ;;
+          permission_policy)
+            [[ "$val" =~ ^(workspace|observe|native|unrestricted)$ ]] \
+              || { echo "config error: permission_policy must be workspace, observe, native, or unrestricted" >&2; exit 1; } ;;
           agent_lines)
             [[ "$val" =~ ^[0-9]+$ ]] && (( val >= 1 )) \
               || { echo "config error: agent_lines must be a positive integer" >&2; exit 1; } ;;
@@ -1238,8 +1369,8 @@ cmd_config() {
       command -v fish >/dev/null 2>&1 || def=zsh
       case "$scope" in
         layout) agent_lines=3; tweb_pct=60; auto_float=false; shell="$def" ;;
-        agent)  provider=""; harness=""; model="" ;;
-        all)    provider=""; harness=""; model=""; agent_lines=3; tweb_pct=60; auto_float=false; shell="$def"; worktree_root="" ;;
+        agent)  provider=""; harness=""; model=""; permission_policy=workspace ;;
+        all)    provider=""; harness=""; model=""; permission_policy=workspace; agent_lines=3; tweb_pct=60; auto_float=false; shell="$def"; default_dir=""; worktree_root="" ;;
         *) echo "usage: rtide config reset [layout|agent|all]" >&2; exit 1 ;;
       esac
       write_global_config
@@ -1258,7 +1389,7 @@ cmd_refresh_window() {
   local target="${2:-$(tmux display-message -p '#{window_id}' 2>/dev/null || true)}" agent nvim tweb workspace width tweb_w hidden
   [[ -n "$target" ]] && tmux display-message -p -t "$target" '#{window_id}' >/dev/null 2>&1 \
     || { echo "refresh-window: no RTIDE window" >&2; exit 1; }
-  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  load_config_file "$CONFIG"
   agent_lines="${agent_lines:-3}"; tweb_pct="${tweb_pct:-60}"
   agent=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="agent"{print $1; exit}')
   nvim=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="nvim"{print $1; exit}')
@@ -1299,7 +1430,7 @@ cmd_refresh() {
   tmux list-windows -t "$sess" -F '#{window_name}' 2>/dev/null | grep -qx work \
     || { echo "refresh: not an rtide workspace: $sess" >&2; exit 1; }
 
-  [[ -f "$CONFIG" ]] && source "$CONFIG"
+  load_config_file "$CONFIG"
   agent_lines="${agent_lines:-3}"
   tweb_pct="${tweb_pct:-${nvim_pct:-60}}"
 
@@ -1361,7 +1492,7 @@ cmd_nvim() {
   if [[ "$hidden" == 1 ]]; then
     tmux resize-pane -t "$nvim" -x 1
   else
-    [[ -f "$CONFIG" ]] && source "$CONFIG"
+    load_config_file "$CONFIG"
     tweb_pct="${tweb_pct:-60}"; width=$(tmux display-message -p -t "$target" '#{window_width}')
     tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
     tmux resize-pane -t "$tweb" -x "$tweb_w"
@@ -1454,6 +1585,7 @@ cmd_menu() {
     "Zoom tweb"        t "run-shell '$RTIDE_CMD zoom tweb'" \
     "Zoom agent"       a "run-shell '$RTIDE_CMD zoom agent'" \
     "Config…"          c "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 70% -h 50% 'sh -c \"$RTIDE_CMD config; echo; read -p done\"'" \
+    "Settings…"        S "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 72% -h 70% '$RTIDE_CMD settings edit #{@rtide-workspace}'" \
     "" \
     "- OUTPUTS"         "" "" \
     "Output history"   h "run-shell '$RTIDE_CMD history ${window}'" \
@@ -1741,6 +1873,7 @@ case "${1:-}" in
   kill)   cmd_quit "$@" ;;
   agent)  cmd_agent "$@" ;;
   permissions) cmd_permissions "$@" ;;
+  settings) cmd_settings "$@" ;;
   auth)   cmd_auth "$@" ;;
   config) cmd_config "$@" ;;
   refresh) cmd_refresh "$@" ;;
@@ -1758,7 +1891,7 @@ esac
 
 # Load config (run wizard on first run)
 [[ -f "$CONFIG" ]] || cmd_setup
-source "$CONFIG"
+load_config_file "$CONFIG"
 
 # Development launchers intentionally default to host access so RTIDE itself
 # can exercise tmux. Normal installed workspaces retain the workspace default.
@@ -1770,6 +1903,12 @@ fi
 harness="${harness:-${agent:-}}"
 agent_lines="${agent_lines:-3}"   # agent strip height in lines — minimal input box (status + prompt)
 tweb_pct="${tweb_pct:-${nvim_pct:-60}}" # legacy nvim_pct actually controlled tweb width
+# A hand-edited or partial config must not abort a launch on unset names.
+shell="${shell:-bash}"
+auto_float="${auto_float:-false}"
+default_dir="${default_dir:-}"
+worktree_root="${worktree_root:-}"
+permission_policy="${permission_policy:-workspace}"
 
 # Bare `rtide` → pick an active workspace to resume, or start a new one.
 if [[ -z "${1:-}" ]]; then
@@ -1820,18 +1959,14 @@ fi
 
 # Per-workspace override + always-ask selection (new workspace)
 WS_AGENT="$DIR/$WS_AGENT_FILE"
-[[ -f "$WS_AGENT" ]] && source "$WS_AGENT"
+load_config_file "$WS_AGENT"
 harness="${harness:-${agent:-}}"
 if [[ "${RTIDE_ASK:-1}" != "0" ]]; then
   prompt_selection "${provider:-}" "${harness:-}" "${model:-}" "${permission_policy:-workspace}"
   provider="$PROVIDER"; harness="$HARNESS"; model="$MODEL"; permission_policy="$PERMISSION_POLICY"
-  mkdir -p "$(dirname "$WS_AGENT")"
-  cat > "$WS_AGENT" <<EOF
-provider=$provider
-harness=$harness
-model=$model
-permission_policy=$permission_policy
-EOF
+  "$SETTINGS_BIN" --config "$CONFIG" set --scope workspace "$DIR" \
+    "provider=$provider" "harness=$harness" "model=$model" \
+    "permission_policy=$permission_policy" >/dev/null
 fi
 
 # Validate the combo before launching. A stale config (e.g. agent=claude +
@@ -1852,6 +1987,12 @@ fi
 # invokes the harness non-interactively per request and renders to tweb.
 permission_policy="${permission_policy:-${RTIDE_DEV_PERMISSION_POLICY:-workspace}}"
 AGENT_CMD="$RTIDE_AGENT_CMD $harness $provider $model $DIR $permission_policy"
+
+# Record startup-effective non-agent settings before surfaces launch. The agent
+# process adds its identity, policy, and PID only after it is actually running.
+"$SETTINGS_BIN" publish "$DIR" "agent_lines=$agent_lines" "tweb_pct=$tweb_pct" \
+  "shell=$shell" "auto_float=${auto_float:-false}" "default_dir=${default_dir:-}" \
+  "worktree_root=${worktree_root:-}" >/dev/null
 
 # Build the layout with pane IDs (index-agnostic — respects base-index settings).
 # Each pane gets a pane-scoped @rtide-role option (survives title changes by apps).

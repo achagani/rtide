@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >> "${FAKE_TMUX_LOG:?}"
+case "${1:-}" in
+  list-panes)
+    printf '%%7\n'
+    ;;
+  display-message)
+    format="${*: -1}"
+    case "$format" in
+      '#{pane_current_path}') printf '%s\n' "${FAKE_WS:?}" ;;
+      '#{window_id}') printf '@1\n' ;;
+    esac
+    ;;
+  send-keys)
+    if [[ "$*" == *"libexec/rtide/agent"* ]]; then
+      if [[ "${FAIL_TRANSITION:-0}" == 1 ]]; then
+        # The replacement never publishes matching effective state, so the
+        # transition must time out, roll back, and report failure.
+        exit 0
+      fi
+      "${REAL_SETTINGS:?}" publish "${FAKE_WS:?}" \
+        provider=openai harness=codex model=test-model \
+        "permission_policy=${EXPECTED_POLICY:?}" --pid 902
+    fi
+    ;;
+esac

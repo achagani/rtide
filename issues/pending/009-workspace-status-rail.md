@@ -1,7 +1,7 @@
 # 009: Workspace status and switching rail
 
 - Status: proposed
-- Priority rank: 3
+- Priority rank: 2
 - Branch: `issue/009-workspace-status-rail`
 - Worktree: `../rtide-worktrees/009-workspace-status-rail`
 
