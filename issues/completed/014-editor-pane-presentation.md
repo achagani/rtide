@@ -1,6 +1,6 @@
 # 014: Editor pane and border presentation
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/014-editor-pane-presentation`
 - Worktree: `../rtide-worktrees/014-editor-pane-presentation`
@@ -107,4 +107,40 @@ resulting window width, so the clamped sidebar passed.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/014-editor-pane-presentation`, branch
+`issue/014-editor-pane-presentation`, as RTIDE 0.2.65.
+
+### Review-view sizing
+
+`share/rtide-review.lua` is now width-aware. It reconciles the Snacks Explorer
+against the current pane width on every `VimResized` and on `VeryLazy`: it opens
+only at `RTIDE_REVIEW_MIN_COLUMNS` (default 40), closes a sidebar opened below
+`RTIDE_REVIEW_MIN_SIDEBAR` (default 30), and collapses duplicates. Verified in a
+real session: the editor pane recovered to 89 columns and the Explorer opened at
+40 columns instead of a 6-column sliver over the dashboard.
+
+### Pane border labels
+
+`rtide_tmux_chrome` builds `pane-border-format` from a role/label expression
+(`@rtide-label` override, else `nvim`→`editor`, `agent`→`composer`,
+`tweb`→`output`, else `terminal`). It no longer uses `#{pane_title}`, so borders
+no longer show `SHELL=fish nvim --li …`. Verified in the live client: the
+rendered borders read `editor`, `output`, and `composer`.
+
+### Two bugs found only in a real launch
+
+1. The module read the picker source from `picker.source`, but Snacks stores it
+   at `picker.opts.source`, so every resize spawned another Explorer (visible as
+   stacked `Explorer` panels and a wrong file list).
+2. `vim.defer_fn` returns userdata, so `vim.fn.timer_stop` raised
+   `E5101: Cannot convert given Lua type` inside the resize autocommand. Replaced
+   with a libuv timer.
+
+The test stub now mirrors the real `picker.opts.source` field, and a regression
+check asserts no stacked explorers, so both defects are caught headlessly.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.65 is the active
+immutable release. Added `tests/test-review-view.sh`; the real live session was
+restarted and inspected for geometry, borders, and errors.
+
+Not yet done: worktree removal and branch deletion.
