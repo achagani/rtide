@@ -82,18 +82,23 @@ rtide_tmux_chrome() {
   local session="$1" window="$2" dev="${3:-0}" version="${4:-}" label="${5:-DEVELOPMENT}"
   local state ready_style left right border active title
   state=$(rtide_ui_state_label ready)
+  # Border labels name the pane's role. Never use #{pane_title}: RTIDE starts
+  # each pane with its launch command, so the title leaks a raw command line.
+  # @rtide-label overrides the role mapping when set.
+  local label_expr
+  label_expr='#{?#{==:#{@rtide-label},},#{?#{==:#{@rtide-role},nvim},editor,#{?#{==:#{@rtide-role},agent},composer,#{?#{==:#{@rtide-role},tweb},output,terminal}}},#{@rtide-label}}'
   if rtide_ui_plain; then
     ready_style='default'
     left=' RTIDE  #S:#W '
     right=" #{@rtide-state}  #{@rtide-layout-mode}  output:live ${version:+ v$version }"
-    border='default'; active='bold'; title=' #{pane_title} '
+    border='default'; active='bold'; title=" ${label_expr} "
   else
     ready_style="bg=${RTIDE_UI_BG},fg=${RTIDE_UI_TEXT}"
     left="#[bg=${RTIDE_UI_FOCUS},fg=${RTIDE_UI_BG},bold] RTIDE #[bg=${RTIDE_UI_BG},fg=${RTIDE_UI_TEXT}] #S:#W "
     right="#[fg=${RTIDE_UI_MUTED}] #{@rtide-state}  mode:#{@rtide-layout-mode}  output:live ${version:+ v$version }"
     border="fg=${RTIDE_UI_BORDER}"
     active="fg=${RTIDE_UI_FOCUS},bold"
-    title="#[fg=${RTIDE_UI_MUTED}] #{pane_title} "
+    title="#[fg=${RTIDE_UI_MUTED}] ${label_expr} "
   fi
   if [[ "$dev" == 1 ]]; then
     left="#[bg=${RTIDE_UI_WARNING},fg=${RTIDE_UI_BG},bold] DEV #[bg=${RTIDE_UI_BG},fg=${RTIDE_UI_TEXT}] #S:#W "

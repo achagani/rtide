@@ -11,6 +11,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # The launcher must build a review-first command for a fresh pane and pass the
 # file through when one is given.
 review_cmd=$(bash -c '
+  source "'"$ROOT"'/libexec/rtide/runtime-paths.sh"
   RTIDE_SHARE_DIR="'"$ROOT"'/share"
   RTIDE_REVIEW_LUA="$RTIDE_SHARE_DIR/rtide-review.lua"
   '"$(sed -n '/^rtide_nvim_command()/,/^}/p' "$ROOT/bin/rtide")"'
@@ -21,6 +22,7 @@ grep -F 'rtide-review.lua' <<< "$review_cmd" >/dev/null || fail 'fresh launch do
 grep -F "m.setup" <<< "$review_cmd" >/dev/null || fail 'review module is not invoked'
 
 file_cmd=$(bash -c '
+  source "'"$ROOT"'/libexec/rtide/runtime-paths.sh"
   RTIDE_SHARE_DIR="'"$ROOT"'/share"
   RTIDE_REVIEW_LUA="$RTIDE_SHARE_DIR/rtide-review.lua"
   '"$(sed -n '/^rtide_nvim_command()/,/^}/p' "$ROOT/bin/rtide")"'

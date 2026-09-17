@@ -42,6 +42,7 @@ test: check
 	./tests/test-picker-contract.sh
 	./tests/test-tui-design.sh
 	./tests/test-review-startup.sh
+	./tests/test-review-view.sh
 	./tests/test-runtime-root.sh
 	./tests/test-runtime-sockets.sh
 	./tests/test-autoinit-safety.sh
