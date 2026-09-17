@@ -105,7 +105,7 @@ other settings have mixed or unused behavior that this issue must make explicit.
 
 ## Worktree cleanup checklist
 
-- [ ] Integrate and verify the accepted change on `main`.
+- [x] Integrate and verify the accepted change on `main` (fast-forward to 3dae106, full suite passed).
 - [ ] Remove `../rtide-worktrees/002-runtime-permission-policy-switching`.
 - [ ] Delete `issue/002-runtime-permission-policy-switching` safely.
 
