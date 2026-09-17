@@ -74,13 +74,13 @@ recovery and visual acknowledgement remain broader than startup readiness.
 ## Worktree cleanup checklist
 
 - [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/004-tweb-connection-recovery`.
-- [ ] Delete `issue/004-tweb-connection-recovery` safely.
+- [x] Remove `../rtide-worktrees/004-tweb-connection-recovery`.
+- [x] Delete `issue/004-tweb-connection-recovery` safely.
 
 ## Completion notes
 
 Completed in worktree `../rtide-worktrees/004-tweb-connection-recovery`, branch
-`issue/004-tweb-connection-recovery`, as RTIDE 0.2.53.
+`issue/004-tweb-connection-recovery`, as RTIDE 0.2.54.
 
 - Added a five-state connection model (`connected`, `disconnected`, `missing`,
   `multiple`, `standalone`) to `libexec/rtide/tweb-common.sh`. A pane is only
@@ -97,7 +97,7 @@ Completed in worktree `../rtide-worktrees/004-tweb-connection-recovery`, branch
 - Added `rtide tweb status|recover|recreate` and documented the routing contract
   in `docs/architecture/output-routing.md`.
 
-Evidence: full `make install` suite passed and RTIDE 0.2.53 is the active
+Evidence: full `make install` suite passed and RTIDE 0.2.54 is the active
 immutable release. Added `tests/test-tweb-recovery.sh` plus a state-aware `tweb`
 fixture covering connected/disconnected/missing/multiple classification,
 acknowledged display, queued preservation, in-place reconnect, and
