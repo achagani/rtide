@@ -102,8 +102,8 @@ resulting window width, so the clamped sidebar passed.
 
 - [ ] Merge or otherwise integrate the accepted change into `main`.
 - [ ] Verify the integrated result from the primary checkout.
-- [ ] Remove `../rtide-worktrees/014-editor-pane-presentation`.
-- [ ] Delete `issue/014-editor-pane-presentation` with `git branch -d`.
+- [x] Remove `../rtide-worktrees/014-editor-pane-presentation`.
+- [x] Delete `issue/014-editor-pane-presentation` with `git branch -d`.
 
 ## Completion notes
 
