@@ -36,23 +36,27 @@ SETTINGS_BIN = os.path.join(SELF_DIR, "settings")
 TWEB_RENDER = os.path.join(SELF_DIR, "render")
 WORKSPACE_STATUS = os.path.join(SELF_DIR, "workspace-status")
 
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-CYAN = "\033[36m"
-BLUE = "\033[34m"
-MAGENTA = "\033[35m"
-ORANGE = "\033[38;5;208m"
-DIM = "\033[2m"
-RESET = "\033[0m"
+PLAIN_UI = bool(os.environ.get("NO_COLOR") or os.environ.get("RTIDE_NO_COLOR") == "1"
+                or os.environ.get("TERM") == "dumb")
+ASCII_UI = os.environ.get("RTIDE_ASCII") == "1"
+GREEN = "" if PLAIN_UI else "\033[32m"
+YELLOW = "" if PLAIN_UI else "\033[33m"
+RED = "" if PLAIN_UI else "\033[31m"
+CYAN = "" if PLAIN_UI else "\033[36m"
+BLUE = "" if PLAIN_UI else "\033[34m"
+MAGENTA = "" if PLAIN_UI else "\033[35m"
+ORANGE = "" if PLAIN_UI else "\033[38;5;208m"
+DIM = "" if PLAIN_UI else "\033[2m"
+RESET = "" if PLAIN_UI else "\033[0m"
 DEV_MODE = os.environ.get("RTIDE_DEV_MODE") == "1"
 DEV_LABEL = os.environ.get("RTIDE_DEV_LABEL", "DEVELOPMENT")
 DEV_WORKTREE = os.path.realpath(os.environ.get("RTIDE_DEV_WORKTREE", "")) if DEV_MODE else ""
 DEV_BADGE = f"{ORANGE}[DEV]{RESET} " if DEV_MODE else ""
-VOICE_CONTROL = f"\0337\033[999C\033[10D{MAGENTA}🎙 voice{RESET}\0338"
-PROMPT = (f"\001{ORANGE if DEV_MODE else CYAN}\002╰─❯\001{RESET}\002 "
+VOICE_CONTROL = f"\0337\033[999C\033[10D{MAGENTA}{'voice' if ASCII_UI else '🎙 voice'}{RESET}\0338"
+PROMPT_MARK = ">" if ASCII_UI else "╰─❯"
+PROMPT = (f"\001{ORANGE if DEV_MODE else CYAN}\002{PROMPT_MARK}\001{RESET}\002 "
           f"\001{VOICE_CONTROL}\002")
-PROMPT_PLAIN = "╰─❯ " + VOICE_CONTROL
+PROMPT_PLAIN = PROMPT_MARK + " " + VOICE_CONTROL
 
 def clear():
     # Erase the visible pane and its tmux scrollback so a submitted request
@@ -166,63 +170,37 @@ def managed_tweb_pane():
 
 
 class WindowActivity:
-    """Animate the current tmux window title without losing its base name."""
+    """Publish transition-owned state without a background process loop."""
 
-    FRAMES = ("◐", "◓", "◑", "◒")
+    def __init__(self, interval=None):
+        self.pane = os.environ.get("TMUX_PANE", "")
+        self.active = False
 
-    def __init__(self, interval=0.24):
-        self.interval = interval
-        self.window = None
-        self.base = None
-        self.stop_event = threading.Event()
-        self.thread = None
-
-    def start(self):
-        pane = os.environ.get("TMUX_PANE", "")
-        if not pane or self.thread:
+    def publish(self, state):
+        if not self.pane:
             return False
-        location = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", pane,
-             "#{window_id}\t#{window_name}"],
-            capture_output=True, text=True,
+        symbols = {"ready": "[ok]" if ASCII_UI else "●",
+                   "working": "[..]" if ASCII_UI else "◐",
+                   "success": "[ok]" if ASCII_UI else "●",
+                   "error": "[x]" if ASCII_UI else "×"}
+        labels = {"success": "done"}
+        subprocess.run(
+            ["tmux", "set-option", "-w", "-t", self.pane, "@rtide-state",
+             f"{symbols.get(state, '[-]')} {labels.get(state, state)}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        fields = location.stdout.rstrip("\n").split("\t", 1)
-        if location.returncode or len(fields) != 2:
-            return False
-        self.window, current = fields
-        stored = subprocess.run(
-            ["tmux", "show-options", "-w", "-v", "-t", self.window,
-             "@rtide-window-name"], capture_output=True, text=True,
-        ).stdout.strip()
-        self.base = stored or current
-        subprocess.run(["tmux", "set-option", "-w", "-t", self.window,
-                        "@rtide-window-name", self.base],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["tmux", "set-option", "-w", "-t", self.window,
-                        "automatic-rename", "off"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.stop_event.clear()
-        self.thread = threading.Thread(target=self._animate, daemon=True)
-        self.thread.start()
         return True
 
-    def _animate(self):
-        index = 0
-        while not self.stop_event.is_set():
-            subprocess.run(["tmux", "rename-window", "-t", self.window,
-                            f"{self.FRAMES[index % len(self.FRAMES)]} {self.base}"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            index += 1
-            self.stop_event.wait(self.interval)
+    def start(self):
+        if not self.pane or self.active:
+            return False
+        self.active = self.publish("working")
+        return self.active
 
-    def stop(self):
-        self.stop_event.set()
-        if self.thread:
-            self.thread.join(timeout=max(1.0, self.interval * 2))
-        if self.window and self.base:
-            subprocess.run(["tmux", "rename-window", "-t", self.window, self.base],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.thread = None
+    def stop(self, state="ready"):
+        if self.active:
+            self.publish(state)
+        self.active = False
 
 
 def fork_command(arguments):
@@ -274,18 +252,16 @@ def current_tweb_url(pane):
 
 
 def show_and_verify(target, source_path=None):
-    """Load target and verify tweb actually reports it, retrying if needed."""
+    """Submit one navigation, then observe acknowledgement without resubmitting."""
     pane = managed_tweb_pane()
     # Electron startup and the twebd registration handshake can take several
     # seconds on a cold cache. Keep retrying long enough that the first agent
     # response is not reported as missing merely because the pane is settling.
+    command = [TWEB_RENDER, source_path] if source_path else [TWEB_RENDER, "--url", target]
+    result = subprocess.run(command, capture_output=True)
+    if result.returncode:
+        return False
     for _ in range(30):
-        if source_path:
-            subprocess.run([TWEB_RENDER, source_path], capture_output=True)
-        else:
-            # Route every artifact through the shared renderer so page zoom and
-            # persistent output navigation are applied to custom pages too.
-            subprocess.run([TWEB_RENDER, "--url", target], capture_output=True)
         if current_tweb_url(pane) == target:
             return True
         time.sleep(0.25)
@@ -367,7 +343,8 @@ class LifecyclePublisher:
 
 def idle_status():
     brand = f"{ORANGE}{DEV_LABEL}{RESET}" if DEV_MODE else f"{MAGENTA}RTIDE{RESET}"
-    status(f"{DIM}╭─{RESET} {brand}  {GREEN}● ready{RESET}"
+    ready = "[ok]" if ASCII_UI else "●"
+    status(f"{DIM}{'+-' if ASCII_UI else '╭─'}{RESET} {brand}  {GREEN}{ready} ready{RESET}"
            f" {DIM}· type, edit, or prefix+v to speak{RESET}")
 
 
@@ -421,12 +398,13 @@ def working_status(tool=None, elapsed=0, queued=0, reset_prompt=False):
     # DEV_BADGE renders as "[DEV] "; use that exact visible width so narrow
     # prompt panes never wrap the live status line.
     dev_prefix = "[DEV] " if DEV_MODE else ""
-    prefix = f"{dev_prefix}● working {timer}{queue}"
+    mark = "[..]" if ASCII_UI else "◐"
+    prefix = f"{dev_prefix}{mark} working {timer}{queue}"
     width = shutil.get_terminal_size((80, 24)).columns
     room = max(0, width - len(prefix) - (3 if detail else 0))
     detail = detail[:room].rstrip()
     suffix = f" {DIM}·{RESET} {color}{detail}{RESET}" if detail else ""
-    line = (f"{DEV_BADGE}{YELLOW}●{RESET} working {CYAN}{timer}{RESET}"
+    line = (f"{DEV_BADGE}{YELLOW}{mark}{RESET} working {CYAN}{timer}{RESET}"
             f"{MAGENTA}{queue}{RESET}{suffix}")
     if reset_prompt:
         # Keep a discoverable input line beneath the live status. This also
@@ -439,11 +417,11 @@ def working_status(tool=None, elapsed=0, queued=0, reset_prompt=False):
 
 
 def done_status(secs):
-    status(f"{GREEN}●{RESET} done ({secs:.0f}s)")
+    status(f"{GREEN}{'[ok]' if ASCII_UI else '●'}{RESET} done ({secs:.0f}s)")
 
 
 def error_status(msg):
-    status(f"{RED}●{RESET} error: {msg[:100]}")
+    status(f"{RED}{'[x]' if ASCII_UI else '×'}{RESET} error: {msg[:100]}")
 
 
 def get_run_cmd(harness, provider, model, submission, session, permission="workspace"):

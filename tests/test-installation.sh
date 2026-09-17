@@ -53,7 +53,7 @@ new_session_line=$(grep -n '^tmux new-session -d ' <<< "$startup_source" | cut -
 mouse_option_line=$(grep -n '^tmux set-option -g mouse on$' <<< "$startup_source" | cut -d: -f1)
 (( new_session_line < mouse_option_line )) \
   || fail 'first-run launcher applies tmux options before creating its server'
-grep -F 'DEV BUILD' "$ROOT/bin/rtide" >/dev/null \
+grep -F 'DEV' "$ROOT/libexec/rtide/ui.sh" >/dev/null \
   || fail 'development tmux badge is missing'
 grep -F 'body class="{{DEV_CLASS}}"' "$ROOT/share/welcome.html" >/dev/null \
   || fail 'development welcome theme is missing'
@@ -85,7 +85,7 @@ grep -F '"Fork Manager…"' "$ROOT/bin/rtide" >/dev/null \
 grep -F 'Escape' "$ROOT/bin/rtide" >/dev/null \
   || fail 'new fork prompt does not document Escape cancellation'
 name_source=$(sed -n '/^cmd_fork_new_popup()/,/^cmd_fork()/p' "$ROOT/bin/rtide")
-grep -F 'fzf --print-query' <<< "$name_source" >/dev/null \
+grep -F -- '--print-query' <<< "$name_source" >/dev/null \
   || fail 'new fork prompt does not use native cancellable input'
 grep -F 'enter:accept-or-print-query' <<< "$name_source" >/dev/null \
   || fail 'new fork prompt cannot submit a typed name without a list match'

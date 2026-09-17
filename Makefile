@@ -6,6 +6,7 @@ BASH_SOURCES := install.sh \
 	bin/rtide \
 	libexec/rtide/mcp libexec/rtide/memory libexec/rtide/open \
 	libexec/rtide/pane-popup libexec/rtide/picker.sh \
+	libexec/rtide/ui.sh \
 	libexec/rtide/provider libexec/rtide/render libexec/rtide/run \
 	libexec/rtide/tweb-common.sh libexec/rtide/guard-bin/tweb \
 	libexec/rtide/uninstall \
@@ -36,6 +37,7 @@ test: check
 	python3 tests/test-settings.py
 	python3 tests/test-install-tmux.py
 	./tests/test-picker-contract.sh
+	./tests/test-tui-design.sh
 	./tests/test-fork-snapshot.sh
 	./tests/test-fork-launch-status.sh
 	./tests/test-pane-popup-safety.sh

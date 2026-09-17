@@ -107,24 +107,21 @@ class AgentStatusTests(unittest.TestCase):
             page = AGENT.build_result_html("Request", "Answer", "feature", 1)
         self.assertNotIn("DEVELOPMENT WORKTREE", page)
 
-    def test_window_activity_animates_and_restores_base_name(self):
-        location = mock.Mock(returncode=0, stdout="@7\tfeature-one\n")
-        stored = mock.Mock(returncode=0, stdout="feature-one\n")
-        calls = [location, stored]
-        def fake_run(*args, **kwargs):
-            return calls.pop(0) if calls else mock.Mock(returncode=0, stdout="")
+    def test_window_activity_publishes_transition_owned_state(self):
         with mock.patch.dict(os.environ, {"TMUX_PANE": "%9"}), \
                 mock.patch.object(AGENT.subprocess, "run",
-                                  side_effect=fake_run) as run:
-            activity = AGENT.WindowActivity(interval=0.01)
+                                  return_value=mock.Mock(returncode=0)) as run:
+            activity = AGENT.WindowActivity()
             self.assertTrue(activity.start())
-            activity.stop_event.wait(0.03)
             activity.stop()
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertTrue(any(cmd[:2] == ["tmux", "rename-window"] and
-                            cmd[-1].endswith(" feature-one") for cmd in commands))
-        self.assertEqual(commands[-1], ["tmux", "rename-window", "-t", "@7",
-                                        "feature-one"])
+        # Working on start, ready on stop, via a window option — no renaming
+        # loop and no recurring subprocess churn.
+        self.assertEqual(commands[0], ["tmux", "set-option", "-w", "-t", "%9",
+                                       "@rtide-state", "◐ working"])
+        self.assertEqual(commands[-1], ["tmux", "set-option", "-w", "-t", "%9",
+                                        "@rtide-state", "● ready"])
+        self.assertFalse(any("rename-window" in cmd for cmd in commands))
 
     def test_request_context_is_expanded_by_default(self):
         page = AGENT.build_result_html("Original request", "Answer", "demo", 1)

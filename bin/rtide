@@ -32,6 +32,7 @@ RTIDE_LIBEXEC_DIR="$RTIDE_ROOT/libexec/rtide"
 RTIDE_SHARE_DIR="$RTIDE_ROOT/share"
 export RTIDE_ROOT RTIDE_BIN_DIR RTIDE_LIBEXEC_DIR RTIDE_SHARE_DIR
 source "$RTIDE_LIBEXEC_DIR/picker.sh"
+source "$RTIDE_LIBEXEC_DIR/ui.sh"
 source "$RTIDE_LIBEXEC_DIR/tweb-common.sh"
 PROVIDER_BIN="$RTIDE_LIBEXEC_DIR/provider"
 SETTINGS_BIN="$RTIDE_LIBEXEC_DIR/settings"
@@ -127,8 +128,8 @@ providers_for_installed() {
   echo "${out[*]}"
 }
 
-# pick <prompt> <default> <choices...> — fzf picker when available, else numbered list.
-# Free text is allowed: with fzf, a query that matches nothing is used as the answer.
+# pick <prompt> <default> <choices...> is selection-only. pick_freeform keeps
+# unmatched input for fields such as model names.
 RTIDE_CANCELLED=0
 
 # Decode fzf --print-query output using RTIDE's searchable-create contract:
@@ -138,8 +139,9 @@ cancellable_input() {
   local prompt="$1" def="${2:-}" result
   RTIDE_CANCELLED=0
   if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
-    result=$(printf '\n' | fzf --print-query --query='' --layout=reverse \
-      --border=rounded --height=40% --no-info --prompt="$prompt ❯ " \
+    rtide_picker_options freeform compact
+    result=$(printf '\n' | fzf "${RTIDE_PICKER_ARGS[@]}" --print-query --query='' \
+      --no-info --prompt="$prompt › " \
       --bind='enter:accept-or-print-query' \
       --header="Enter = accept${def:+ · default: $def}   Esc = cancel") \
       || { RTIDE_CANCELLED=1; return 130; }
@@ -153,35 +155,36 @@ cancellable_input() {
   printf '%s\n' "${result:-$def}"
 }
 
-pick() {
-  local prompt="$1" def="$2"; shift 2
+pick_with_policy() {
+  local policy="$1" prompt="$2" def="$3"; shift 3
   local choices=("$@")
   if [[ ${#choices[@]} -eq 0 ]]; then
     cancellable_input "$prompt" "$def"
     return $?
   fi
-  if [[ ${#choices[@]} -eq 1 ]]; then
+  if [[ ${#choices[@]} -eq 1 && "$policy" == select ]]; then
     echo "${choices[0]}"
     return
   fi
   if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
-    local out sel qry
+    local out decision mode value
     local items=("${choices[@]}")
     # put the default first so it's highlighted — Enter accepts it, typing filters normally
     if printf '%s\n' "${choices[@]}" | grep -Fxq "$def"; then
       items=("$def")
       for c in "${choices[@]}"; do [[ "$c" != "$def" ]] && items+=("$c"); done
     fi
-    out=$(printf '%s\n' "${items[@]}" | fzf --prompt="$prompt: " --height=40% \
-      --border --print-query --bind='enter:accept-or-print-query') \
+    rtide_picker_options "$policy" compact
+    local -a bindings=()
+    [[ "$policy" == freeform ]] && bindings=(--bind='enter:accept-or-print-query')
+    out=$(printf '%s\n' "${items[@]}" | fzf "${RTIDE_PICKER_ARGS[@]}" \
+      --prompt="$prompt › " --print-query "${bindings[@]}") \
       || { RTIDE_CANCELLED=1; return 130; }
-    sel=$(printf '%s\n' "$out" | tail -1)
-    if printf '%s\n' "${choices[@]}" | grep -Fxq "$sel"; then
-      echo "$sel"
-    else
-      qry=$(printf '%s\n' "$out" | head -1)
-      echo "${qry:-$def}"
-    fi
+    decision=$(rtide_picker_decode "$out" "$policy")
+    mode=${decision%%$'\t'*}; value=${decision#*$'\t'}
+    [[ "$mode" == open || "$mode" == value ]] \
+      || { RTIDE_CANCELLED=1; return 130; }
+    printf '%s\n' "${value%%$'\t'*}"
     return
   fi
   # fallback: numbered list, type number/name/Enter
@@ -198,6 +201,9 @@ pick() {
   fi
   echo "$ans"
 }
+
+pick() { pick_with_policy select "$@"; }
+pick_freeform() { pick_with_policy freeform "$@"; }
 
 # prompt_selection <cur_provider> <cur_harness> <cur_model> — sets PROVIDER/HARNESS/MODEL
 PROVIDER=""; HARNESS=""; MODEL=""; PERMISSION_POLICY="workspace"
@@ -218,7 +224,7 @@ prompt_selection() {
   HARNESS=$(pick "Harness" "${HARNESS:-${avail[0]}}" "${avail[@]}") || return $?
   # model — default to the current one (free text allowed, so no availability check)
   models=$("$PROVIDER_BIN" models "$PROVIDER")
-  MODEL=$(pick "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models) || return $?
+  MODEL=$(pick_freeform "Model" "${3:-$(echo "$models" | awk '{print $1}')}" $models) || return $?
   local policies
   policies=$("$PROVIDER_BIN" permissions "$HARNESS")
   [[ " $policies " == *" $current_permission "* ]] || current_permission=$(printf '%s' "$policies" | awk '{print $1}')
@@ -448,16 +454,18 @@ launch_fork_window() {
   tmux set-option -w -t "$fork_window" @rtide-workspace "$fork_dir"
   tmux set-option -w -t "$fork_window" @rtide-window-name "$label"
   tmux set-option -w -t "$fork_window" automatic-rename off
+  rtide_tmux_chrome "$sess" "$fork_window" "${DEV_MODE:-0}" \
+    "$(tr -d '[:space:]' < "$RTIDE_ROOT/VERSION")" "${DEV_LABEL:-DEVELOPMENT}"
   nvim_pane=$(tmux list-panes -t "$fork_window" -F '#{pane_id}' | head -1)
   tmux set-option -p -t "$nvim_pane" @rtide-role nvim
-  tmux select-pane -t "$nvim_pane" -T nvim
+  tmux select-pane -t "$nvim_pane" -T editor
   tmux send-keys -t "$nvim_pane" "SHELL=$shell nvim --listen '$fork_dir/.rtide/nvim.sock' '$fork_dir'" Enter
   agent_pane=$(tmux split-window -d -v -P -F '#{pane_id}' -t "$nvim_pane" -l "$agent_lines" -c "$fork_dir")
   tmux set-option -p -t "$agent_pane" @rtide-role agent
-  tmux select-pane -t "$agent_pane" -T agent
+  tmux select-pane -t "$agent_pane" -T composer
   tweb_pane=$(tmux split-window -d -h -P -F '#{pane_id}' -t "$nvim_pane" -p "$tweb_pct" -c "$fork_dir")
   tmux set-option -p -t "$tweb_pane" @rtide-role tweb
-  tmux select-pane -t "$tweb_pane" -T tweb
+  tmux select-pane -t "$tweb_pane" -T output
   printf '%s\n' "$tweb_pane" > "$fork_dir/.rtide/tweb-pane"
   # No cache match is the normal case for a brand-new fork.  With pipefail,
   # xargs translates grep's no-match status into 123, which would otherwise
@@ -477,10 +485,7 @@ launch_fork_window() {
   printf 'nvim_pane=%s\nagent_pane=%s\ntweb_pane=%s\npage=%s\n' \
     "$nvim_pane" "$agent_pane" "$tweb_pane" "$first_page" >> "$log_file"
   write_fork_launch_status "$status_file" waiting readiness 0 0 0 "Waiting for nvim, tweb, and agent"
-  width=$(tmux display-message -p -t "$fork_window" '#{window_width}')
-  tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
-  tmux resize-pane -t "$agent_pane" -y "$agent_lines"
-  tmux resize-pane -t "$tweb_pane" -x "$tweb_w"
+  apply_window_layout "$fork_window" auto >/dev/null
   tmux set-option -w -t "$fork_window" window-size latest 2>/dev/null || true
   tmux set-hook -w -t "$fork_window" after-resize-window \
     "run-shell '$RTIDE_CMD refresh-window $fork_window >/dev/null 2>&1'" 2>/dev/null || true
@@ -702,6 +707,7 @@ cmd_fork_menu() {
   root=$(fork_root_from_context "$pane") || { echo "fork: not in a Git repository" >&2; return 1; }
   command -v fzf >/dev/null 2>&1 || { echo "fork: fzf is required for the visual manager" >&2; return 1; }
   status_inventory=$("$RTIDE_LIBEXEC_DIR/workspace-status" list --tsv 2>/dev/null || true)
+  rtide_picker_options create full
   output=$({
       printf '＋ Create new fork\tnew\t\t\t\t\n'
       while IFS=$'\t' read -r name branch state ahead path memories; do
@@ -712,7 +718,7 @@ cmd_fork_menu() {
         printf '%s\t%s\t%s · %s\t%s\t%s\t%s\n' "$name" "$branch" "$label" "$state" "$ahead" "$path" "$memories"
       done < <("$RTIDE_LIBEXEC_DIR/forks" --root "$root" list)
     } \
-    | fzf --ansi --print-query --layout=reverse --border=rounded --height=100% \
+    | fzf "${RTIDE_PICKER_ARGS[@]}" --ansi --print-query --height=100% \
       --bind='enter:accept-or-print-query' \
       --header="Fork Manager · create, resume, inspect, or stop\n$(rtide_picker_header create)" \
       --prompt='forks ❯ ' --delimiter=$'\t' --with-nth=1,3,4,6) || true
@@ -728,19 +734,21 @@ cmd_fork_menu() {
   fi
   [[ "$mode" == open ]] || return 0
   IFS=$'\t' read -r name branch state ahead path memories <<< "$selected"
+  rtide_picker_options select full
   action=$(printf '%s\n' \
     $'resume\tResume or switch' $'status\tView status' $'stop\tStop runtime' \
     $'memories\tReview memories' $'repair\tRepair runtime state' \
     $'migrate\tMove to managed storage' $'remove\tFinish and remove' \
-    | fzf --layout=reverse --border=rounded --height=100% \
+    | fzf "${RTIDE_PICKER_ARGS[@]}" --height=100% \
       --delimiter=$'\t' --with-nth=2 \
       --header=$'Fork actions\n'"$name · $state · $ahead" \
       --prompt='action ❯ ') || return 0
   action=${action%%$'\t'*}
   if [[ "$action" == remove ]]; then
+    rtide_picker_options select full
     action=$(printf '%s\n' \
       $'remove\tYes — finish and remove worktree' $'cancel\tCancel — keep fork' \
-      | fzf --layout=reverse --border=rounded --height=100% --no-sort \
+      | fzf "${RTIDE_PICKER_ARGS[@]}" --height=100% --no-sort \
         --delimiter=$'\t' --with-nth=2 \
         --header=$'Permanent removal\nThis deletes the worktree after safety checks' \
         --prompt='confirm ❯ ') || return 0
@@ -757,8 +765,9 @@ cmd_fork_new_popup() {
   # Native fzf cancellation is reliable whether this function is called as a
   # command or nested inside Fork Manager. Enter submits the query; Escape
   # returns non-zero and creates nothing.
-  result=$(printf '\n' | fzf --print-query --query='' --layout=reverse \
-    --border=rounded --height=100% --no-info --prompt='name ❯ ' \
+  rtide_picker_options freeform full
+  result=$(printf '\n' | fzf "${RTIDE_PICKER_ARGS[@]}" --print-query --query='' \
+    --height=100% --no-info --prompt='name › ' \
     --bind='enter:accept-or-print-query' \
     --header=$'Name this fork\nEnter = create automatically or use typed name   Esc = cancel') || true
   [[ -n "$result" ]] || return 0
@@ -959,7 +968,7 @@ resume_session() {
 # working directory is sorted first and marked, so Enter resumes it directly.
 # Enter opens an existing match or creates a workspace for an unknown query.
 cmd_pick() {
-  local sessions cur s dir label lifecycle attention branch sdir disp session
+  local sessions cur s dir label lifecycle attention branch sdir disp
   local -a items=()
   sessions=$("$RTIDE_LIBEXEC_DIR/workspace-status" list --tsv 2>/dev/null || true)
   if [[ -z "$sessions" ]]; then
@@ -968,17 +977,18 @@ cmd_pick() {
   fi
   cur=$(realpath -m "$PWD")
   local DIM=$'\033[2m' YEL=$'\033[33m' CYAN=$'\033[36m' RESET=$'\033[0m'
+  if rtide_ui_plain; then DIM= YEL= CYAN= RESET=; fi
   while IFS=$'\t' read -r s dir label lifecycle attention branch; do
     sdir=$(realpath -m "$dir")
     disp="${DIM}${sdir/#$HOME/~}${RESET} · ${lifecycle}"
     if [[ "$sdir" == "$cur" ]]; then
       # current dir first (fzf preselects line 1 → Enter resumes it)
-      items=("$s"$'\t'"$disp"$'\t'"${YEL}◀ you are here${RESET}" "${items[@]}")
+      items=("$s"$'\t'"$disp"$'\t'"${YEL}current${RESET}"$'\t'"$sdir"$'\t'"$label"$'\t'"$lifecycle"$'\t'"$attention"$'\t'"$branch" "${items[@]}")
     else
-      items+=("$s"$'\t'"$disp")
+      items+=("$s"$'\t'"$disp"$'\t\t'"$sdir"$'\t'"$label"$'\t'"$lifecycle"$'\t'"$attention"$'\t'"$branch")
     fi
   done <<< "$sessions"
-  items+=("${CYAN}+${RESET} new workspace"$'\tworkspace\t')
+  items+=("${CYAN}+${RESET} new workspace"$'\tworkspace\t\t\t\t\t\t')
 
   if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
     local out decision mode qry sel sess rc target
@@ -986,14 +996,13 @@ cmd_pick() {
       # `if` so `set -e` doesn't kill us on fzf's non-zero exits; rc tells
       # abort (130 = Esc/Ctrl-C) apart from no-match (1 = Enter on a query
       # that filtered everything out).
-      if out=$(printf '%s\n' "${items[@]}" | fzf --ansi --print-query \
-            --no-sort --layout=reverse --header-first \
-            --color='bg:#202334,bg+:#313244,fg:#cdd6f4,fg+:#f5e0dc,hl:#89dceb,hl+:#f5c2e7,border:#cba6f7,prompt:#89dceb,pointer:#f5c2e7,marker:#a6e3a1,header:#94e2d5,info:#a6adc8' \
+      rtide_picker_options create full
+      if out=$(printf '%s\n' "${items[@]}" | fzf "${RTIDE_PICKER_ARGS[@]}" --ansi --print-query \
+            --no-sort --header-first --delimiter=$'\t' --with-nth=1,2,3 \
             --bind='enter:accept-or-print-query' \
             --header="RTIDE — open or create a workspace\n$(rtide_picker_header create)" \
-            --prompt='❯ ' --height=60% --border \
-            --preview-window=right:40% \
-            --preview 's={1}; d={2}; session=${s%%:*}; if tmux has-session -t "$session" 2>/dev/null; then echo "dir: $d"; [ -f "$d/.rtide/agent" ] && { echo; echo "agent:"; sed "s/^/    /" "$d/.rtide/agent"; }; echo; tmux list-panes -t "$s" -F "    #{@rtide-role}   #{pane_width}x#{pane_height}"; else echo "start a new workspace (Enter)"; fi' ); then
+            --preview-window='right,45%,border-left,<90(up,35%,border-bottom)' \
+            --preview 'if [ -n {4} ]; then printf "directory\n  %s\n\nworkspace\n  window: %s · state: %s\n  branch: %s\n\nagent\n  attention: %s\n" {4} {5} {6} {8} {7}; [ -f {4}/.rtide/agent ] && { echo; echo "config"; sed "s/^/  /" {4}/.rtide/agent; }; else printf "Create this exact workspace query with Enter.\n"; fi' ); then
         rc=0
       else
         rc=$?
@@ -1399,37 +1408,58 @@ cmd_config() {
   exit 0
 }
 
-# Apply the current global config's layout to a running workspace's panes.
-cmd_refresh_window() {
-  local target="${2:-$(tmux display-message -p '#{window_id}' 2>/dev/null || true)}" agent nvim tweb workspace width tweb_w hidden
+# Apply one named mode without replacing panes or their processes.
+apply_window_layout() {
+  local target="$1" requested="${2:-}" agent nvim tweb workspace width height geometry mode agent_h nvim_w tweb_w
   [[ -n "$target" ]] && tmux display-message -p -t "$target" '#{window_id}' >/dev/null 2>&1 \
-    || { echo "refresh-window: no RTIDE window" >&2; exit 1; }
+    || { echo "layout: no RTIDE window" >&2; return 1; }
   load_config_file "$CONFIG"
   agent_lines="${agent_lines:-3}"; tweb_pct="${tweb_pct:-60}"
   agent=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="agent"{print $1; exit}')
   nvim=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="nvim"{print $1; exit}')
   tweb=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="tweb"{print $1; exit}')
   [[ -n "$agent" && -n "$nvim" && -n "$tweb" ]] \
-    || { echo "refresh-window: incomplete RTIDE layout" >&2; exit 1; }
+    || { echo "layout: incomplete RTIDE layout" >&2; return 1; }
   tmux set-option -w -t "$target" window-size latest 2>/dev/null || true
   if [[ "$(tmux display-message -p -t "$target" '#{window_zoomed_flag}')" == 1 ]]; then
     tmux resize-pane -Z -t "$agent" 2>/dev/null || true
   fi
+  [[ -n "$requested" ]] || requested=$(tmux show-options -w -v -t "$target" @rtide-layout-request 2>/dev/null || true)
+  requested="${requested:-auto}"
   width=$(tmux display-message -p -t "$target" '#{window_width}')
-  tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
-  tmux resize-pane -t "$agent" -y "$agent_lines"
-  tmux resize-pane -t "$tweb" -x "$tweb_w"
-  hidden=$(tmux show-options -w -v -t "$target" @rtide-nvim-hidden 2>/dev/null || true)
-  [[ "$hidden" == 1 ]] && tmux resize-pane -t "$nvim" -x 1
+  height=$(tmux display-message -p -t "$target" '#{window_height}')
+  geometry=$(rtide_layout_geometry "$width" "$height" "$tweb_pct" "$agent_lines" "$requested") \
+    || { echo "layout: unknown mode '$requested'" >&2; return 2; }
+  IFS=$'\t' read -r mode agent_h nvim_w tweb_w <<< "$geometry"
+  tmux resize-pane -t "$agent" -y "$agent_h"
+  if [[ "$mode" == output ]]; then
+    tmux resize-pane -t "$nvim" -x 1
+  elif [[ "$mode" == edit ]]; then
+    tmux resize-pane -t "$tweb" -x 1
+  else
+    tmux resize-pane -t "$tweb" -x "$tweb_w"
+  fi
+  tmux set-option -w -t "$target" @rtide-layout-request "$requested"
+  tmux set-option -w -t "$target" @rtide-layout-mode "$mode"
+  [[ "$mode" == output ]] \
+    && tmux set-option -w -t "$target" @rtide-nvim-hidden 1 \
+    || tmux set-option -w -u -t "$target" @rtide-nvim-hidden 2>/dev/null || true
   workspace=$(tmux display-message -p -t "$tweb" '#{pane_current_path}')
   [[ -d "$workspace/.rtide" ]] && printf '%s\n' "$tweb" > "$workspace/.rtide/tweb-pane"
-  echo "refresh-window: $target — tweb ${tweb_pct}%, prompt ${agent_lines}L"
+  rtide_tweb_controls "$tweb"
+  printf '%s\t%s\t%s\t%s\n' "$mode" "$agent_h" "$nvim_w" "$tweb_w"
+}
+
+cmd_refresh_window() {
+  local target="${2:-$(tmux display-message -p '#{window_id}' 2>/dev/null || true)}" geometry
+  geometry=$(apply_window_layout "$target") || exit $?
+  echo "refresh-window: $target — $(printf '%s' "$geometry" | tr '\t' ' ')"
   exit 0
 }
 
 #   rtide refresh [session|dir]   (no arg → current session; prefix+R passes #{session_name})
 cmd_refresh() {
-  local arg="${2:-}" sess agent nvim tweb workspace w tw hidden changed=""
+  local arg="${2:-}" sess geometry
   if [[ -n "$arg" ]]; then
     # A session name wins; anything else is a directory (basename may itself be rtide-*).
     if tmux has-session -t "$arg" 2>/dev/null; then
@@ -1445,52 +1475,31 @@ cmd_refresh() {
   tmux list-windows -t "$sess" -F '#{window_name}' 2>/dev/null | grep -qx work \
     || { echo "refresh: not an rtide workspace: $sess" >&2; exit 1; }
 
-  load_config_file "$CONFIG"
-  agent_lines="${agent_lines:-3}"
-  tweb_pct="${tweb_pct:-${nvim_pct:-60}}"
+  geometry=$(apply_window_layout "$sess:work") || exit $?
+  echo "refresh: $sess — $(printf '%s' "$geometry" | tr '\t' ' ')"
+  exit 0
+}
 
-  # Refresh always restores client-relative sizing. This also repairs older
-  # sessions created while RTIDE left their tmux window in manual-size mode.
-  tmux set-option -w -t "$sess:work" window-size latest 2>/dev/null || true
-
-  # unzoom first if a pane is zoomed, so the resize targets the real layout
-  if [[ "$(tmux display-message -p -t "$sess:work" '#{window_zoomed_flag}')" == "1" ]]; then
-    tmux resize-pane -Z -t "$(tmux display-message -p -t "$sess:work" '#{pane_id}')"
+cmd_layout() {
+  local mode="${2:-}" target="${3:-}" current next geometry
+  [[ -n "$target" ]] || target=$(tmux display-message -p '#{window_id}' 2>/dev/null || true)
+  [[ -n "$target" ]] || { echo "layout: no workspace window" >&2; exit 1; }
+  if [[ "$mode" == cycle ]]; then
+    current=$(tmux show-options -w -v -t "$target" @rtide-layout-mode 2>/dev/null || true)
+    case "$current" in balanced) next=output ;; output) next=edit ;; edit) next=compose ;; *) next=balanced ;; esac
+    mode="$next"
   fi
-
-  agent=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="agent"{print $1; exit}')
-  nvim=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="nvim"{print $1; exit}')
-  tweb=$(tmux list-panes -t "$sess:work" -F '#{pane_id} #{@rtide-role}' 2>/dev/null | awk '$2=="tweb"{print $1; exit}')
-  if [[ -n "$tweb" ]]; then
-    workspace=$(tmux display-message -p -t "$tweb" '#{pane_current_path}' 2>/dev/null || true)
-    if [[ -d "$workspace/.rtide" ]]; then
-      printf '%s\n' "$tweb" > "$workspace/.rtide/tweb-pane"
-    fi
-  fi
-  w=$(tmux display-message -p -t "$sess:work" '#{window_width}' 2>/dev/null || echo 80)
-  tw=$(( w * tweb_pct / 100 )); (( tw < 10 )) && tw=10
-  hidden=$(tmux show-options -v -t "$sess" @rtide-nvim-hidden 2>/dev/null || true)
-
-  if [[ -n "$agent" ]]; then
-    tmux resize-pane -t "$agent" -y "$agent_lines"
-    changed="strip→${agent_lines}L"
-  fi
-  if [[ "$hidden" == 1 && -n "$nvim" ]]; then
-    tmux resize-pane -t "$nvim" -x 1
-    changed="${changed:+$changed, }nvim→hidden"
-  elif [[ -n "$tweb" ]]; then
-    tmux resize-pane -t "$tweb" -x "$tw"
-    changed="${changed:+$changed, }tweb→${tweb_pct}%"
-  fi
-  [[ -n "$changed" ]] || { echo "refresh: no panes to resize in $sess" >&2; exit 1; }
-  echo "refresh: $sess — $changed"
+  [[ "$mode" =~ ^(auto|balanced|output|edit|compose)$ ]] \
+    || { echo "usage: rtide layout auto|balanced|output|edit|compose|cycle [window]" >&2; exit 2; }
+  geometry=$(apply_window_layout "$target" "$mode") || exit $?
+  echo "layout: $target — $(printf '%s' "$geometry" | tr '\t' ' ')"
   exit 0
 }
 
 # Hide/show nvim without zooming away the prompt strip. tmux panes cannot have
 # zero width, so hidden mode collapses the editor to its one-column minimum.
 cmd_nvim() {
-  local action="${2:-toggle}" target="${3:-}" hidden nvim tweb width tweb_w
+  local action="${2:-toggle}" target="${3:-}" hidden
   [[ -n "$target" ]] || target=$(tmux display-message -p '#{window_id}' 2>/dev/null || true)
   target=$(tmux display-message -p -t "$target" '#{window_id}' 2>/dev/null || true)
   [[ -n "$target" ]] || { echo "nvim: no workspace window" >&2; exit 1; }
@@ -1502,16 +1511,8 @@ cmd_nvim() {
     *) echo "usage: rtide nvim [toggle|hide|show] [session]" >&2; exit 1 ;;
   esac
   tmux set-option -w -t "$target" @rtide-nvim-hidden "$hidden"
-  nvim=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="nvim"{print $1; exit}')
-  tweb=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' | awk '$2=="tweb"{print $1; exit}')
-  if [[ "$hidden" == 1 ]]; then
-    tmux resize-pane -t "$nvim" -x 1
-  else
-    load_config_file "$CONFIG"
-    tweb_pct="${tweb_pct:-60}"; width=$(tmux display-message -p -t "$target" '#{window_width}')
-    tweb_w=$(( width * tweb_pct / 100 )); (( tweb_w < 10 )) && tweb_w=10
-    tmux resize-pane -t "$tweb" -x "$tweb_w"
-  fi
+  [[ "$hidden" == 1 ]] && apply_window_layout "$target" output >/dev/null \
+    || apply_window_layout "$target" balanced >/dev/null
   echo "nvim: $target — $([[ "$hidden" == 1 ]] && echo hidden || echo visible)"
   exit 0
 }
@@ -1523,10 +1524,10 @@ cmd_layout_reset() {
   [[ -n "$target" ]] || { echo "layout-reset: no workspace window" >&2; exit 1; }
   # Reset the complete presentation state while preserving shell, agent
   # selection, and unrelated preferences.
-  "$0" config set agent_lines=3 tweb_pct=60 >/dev/null
+  tmux set-option -w -t "$target" @rtide-layout-request auto
   tmux set-option -w -u -t "$target" @rtide-nvim-hidden 2>/dev/null || true
   tmux set-option -g mouse on
-  "$0" refresh-window "$target" >/dev/null
+  apply_window_layout "$target" auto >/dev/null
   agent=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
     | awk '$2=="agent"{print $1; exit}')
   tweb=$(tmux list-panes -t "$target" -F '#{pane_id} #{@rtide-role}' 2>/dev/null \
@@ -1537,7 +1538,7 @@ cmd_layout_reset() {
   fi
   tmux select-window -t "$target"
   [[ -n "$agent" ]] && tmux select-pane -t "$agent"
-  echo "layout: $target — default nvim 40%, tweb 60%, prompt 3L, tweb pinned"
+  echo "layout: $target — responsive auto mode, output pinned"
   exit 0
 }
 
@@ -1584,30 +1585,35 @@ cmd_menu() {
   # launched. tmux popups can otherwise inherit the server cwd (commonly
   # $HOME), so `rtide new` may open and scan the wrong repository.
   tmux display-menu "${client_args[@]}" -t "$window" \
-    -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
-    -H 'bg=#45475a,fg=#89dceb,bold' \
-    -T "#[align=centre,fg=#94e2d5,bold] RTIDE actions" -x 2 -y C -- \
+    -s "$RTIDE_TMUX_MENU_STYLE" -S "$RTIDE_TMUX_MENU_BORDER" \
+    -H "$RTIDE_TMUX_MENU_ACTIVE" \
+    -T "#[align=centre,fg=${RTIDE_UI_FOCUS},bold] RTIDE · actions" -x 2 -y C -- \
     "- WORKSPACES"      "" "" \
-    "Switch workspace" r "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD switch'" \
-    "Change agent…"    m "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 80% -h 70% '$RTIDE_CMD agent'" \
-    "New workspace…"   n "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD new'" \
-    "Fork Manager…"     f "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 58% -h 72% '$RTIDE_CMD fork-menu #{pane_id}'" \
+    "Switch workspace" r "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD switch'" \
+    "Change agent…"    m "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -x 2 -w 80% -h 70% '$RTIDE_CMD agent'" \
+    "New workspace…"   n "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -d '#{@rtide-workspace}' -x 2 -w 80% -h 70% '$RTIDE_CMD new'" \
+    "Fork Manager…"     f "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -d '#{@rtide-workspace}' -x 2 -w 58% -h 72% '$RTIDE_CMD fork-menu #{pane_id}'" \
     "" \
     "- LAYOUT & VIEW"   "" "" \
+    "Cycle layout mode" l "run-shell '$RTIDE_CMD layout cycle ${window}'" \
+    "Balanced mode"    b "run-shell '$RTIDE_CMD layout balanced ${window}'" \
+    "Output mode"      o "run-shell '$RTIDE_CMD layout output ${window}'" \
+    "Edit mode"        i "run-shell '$RTIDE_CMD layout edit ${window}'" \
+    "Compose mode"     C "run-shell '$RTIDE_CMD layout compose ${window}'" \
     "Refresh layout"   R "run-shell '$RTIDE_CMD refresh-window ${window}'" \
     "Reset pane layout" 0 "run-shell '$RTIDE_CMD layout-reset ${window}'" \
     "Hide/show editor" e "run-shell '$RTIDE_CMD nvim toggle ${window}'" \
     "Zoom tweb"        t "run-shell '$RTIDE_CMD zoom tweb'" \
     "Zoom agent"       a "run-shell '$RTIDE_CMD zoom agent'" \
-    "Config…"          c "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 70% -h 50% 'sh -c \"$RTIDE_CMD config; echo; read -p done\"'" \
-    "Settings…"        S "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -d '#{@rtide-workspace}' -x 2 -w 72% -h 70% '$RTIDE_CMD settings edit #{@rtide-workspace}'" \
+    "Config…"          c "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -x 2 -w 70% -h 50% 'sh -c \"$RTIDE_CMD config; echo; read -p done\"'" \
+    "Settings…"        S "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -d '#{@rtide-workspace}' -x 2 -w 72% -h 70% '$RTIDE_CMD settings edit #{@rtide-workspace}'" \
     "" \
     "- OUTPUTS"         "" "" \
     "Output history"   h "run-shell '$RTIDE_CMD history ${window}'" \
-    "Export output PDF" p "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 72% -h 20% 'sh -c \"$RTIDE_CMD pdf ${window}; echo; read -p done\"'" \
+    "Export output PDF" p "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -x 2 -w 72% -h 20% 'sh -c \"$RTIDE_CMD pdf ${window}; echo; read -p done\"'" \
     "" \
     "- INPUT & MEMORY"  "" "" \
-    "Dictate prompt…"  v "display-popup -E -b rounded -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' -x 2 -w 38% -h 25% 'sh -c \"$RTIDE_LIBEXEC_DIR/dictate #{pane_id}; rc=\$?; [ \$rc -eq 0 ] || read -p \\\"press Enter to close\\\"; exit \$rc\"'" \
+    "Dictate prompt…"  v "display-popup -E -b sharp -s '$RTIDE_TMUX_MENU_STYLE' -S '$RTIDE_TMUX_MENU_BORDER' -x 2 -w 38% -h 25% 'sh -c \"$RTIDE_LIBEXEC_DIR/dictate #{pane_id}; rc=\$?; [ \$rc -eq 0 ] || read -p \\\"press Enter to close\\\"; exit \$rc\"'" \
     "Sweep memories"   s "run-shell '$RTIDE_CMD sweep'" \
     "" \
     "- SESSION"         "" "" \
@@ -1736,9 +1742,9 @@ cmd_slash_menu() {
     tmux send-keys -t "$pane" -l '/'
     exit 0
   fi
-  tmux display-menu -t "$pane" -s 'bg=#202334,fg=#cdd6f4' \
-    -S 'bg=#181825,fg=#cba6f7' -H 'bg=#45475a,fg=#89dceb,bold' \
-    -T "#[align=centre,fg=#94e2d5,bold] Prompt commands" -x 2 -y C \
+  tmux display-menu -t "$pane" -s "$RTIDE_TMUX_MENU_STYLE" \
+    -S "$RTIDE_TMUX_MENU_BORDER" -H "$RTIDE_TMUX_MENU_ACTIVE" \
+    -T "#[align=centre,fg=${RTIDE_UI_FOCUS},bold] RTIDE · prompt commands" -x 2 -y C \
     "Fork Manager…" f "run-shell '$RTIDE_CMD fork-menu $pane'" \
     "Steer current turn…" s "send-keys -t '$pane' -l '/steer '" \
     "Interrupt current turn" i "send-keys -t '$pane' -l '/interrupt'; send-keys -t '$pane' Enter" \
@@ -1754,8 +1760,8 @@ cmd_voice_popup() {
   # A popup created inside the MouseUp event can inherit that event and close
   # immediately. Let the click finish before attaching the popup to its client.
   sleep 0.15
-  tmux display-popup -t "$client" -E -b rounded \
-    -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
+  tmux display-popup -t "$client" -E -b sharp \
+    -s "$RTIDE_TMUX_MENU_STYLE" -S "$RTIDE_TMUX_MENU_BORDER" \
     -x 2 -w 38% -h 25% \
     "sh -c '$RTIDE_LIBEXEC_DIR/dictate \"$pane\"; rc=\$?; [ \$rc -eq 0 ] || read -p \"press Enter to close\"; exit \$rc'"
   exit 0
@@ -1834,8 +1840,8 @@ bind_slash_menu() {
 bind_dictation() {
   tmux set-option -s extended-keys on 2>/dev/null || true
   tmux set-option -s extended-keys-format csi-u 2>/dev/null || true
-  tmux bind-key v display-popup -E -b rounded \
-    -s 'bg=#202334,fg=#cdd6f4' -S 'bg=#181825,fg=#cba6f7' \
+  tmux bind-key v display-popup -E -b sharp \
+    -s "$RTIDE_TMUX_MENU_STYLE" -S "$RTIDE_TMUX_MENU_BORDER" \
     -x 2 -w 38% -h 25% \
     "sh -c '$RTIDE_LIBEXEC_DIR/dictate \"#{pane_id}\"; rc=\$?; [ \$rc -eq 0 ] || read -p \"press Enter to close\"; exit \$rc'"
 }
@@ -1912,6 +1918,7 @@ case "${1:-}" in
   refresh) cmd_refresh "$@" ;;
   refresh-window) cmd_refresh_window "$@" ;;
   layout-reset) cmd_layout_reset "$@" ;;
+  layout) cmd_layout "$@" ;;
   nvim)   cmd_nvim "$@" ;;
   menu)   cmd_menu "$@" ;;
   history) cmd_history "$@" ;;
@@ -2057,29 +2064,20 @@ tmux set-option -w -t "$S:work" @rtide-window-name work
 tmux set-option -w -t "$S:work" automatic-rename off
 tmux set-environment -t "$S" RTIDE_DEV_MODE "$DEV_MODE"
 tmux set-environment -t "$S" RTIDE_DEV_LABEL "$DEV_LABEL"
-if [[ "$DEV_MODE" == 1 ]]; then
-  tmux set-option -t "$S" status on
-  tmux set-option -t "$S" status-style 'bg=#431407,fg=#fff7ed,bold'
-  tmux set-option -t "$S" status-left-length 64
-  tmux set-option -t "$S" status-left "#[bg=#fb923c,fg=#111827,bold]  DEV BUILD  #[bg=#431407,fg=#fff7ed] #S "
-  tmux set-option -t "$S" status-right "#[fg=#fdba74,bold]${DEV_LABEL} #[fg=#fed7aa]· v$(tr -d '[:space:]' < "$RTIDE_ROOT/VERSION") "
-  tmux set-option -w -t "$S:work" pane-border-status top
-  tmux set-option -w -t "$S:work" pane-border-style 'fg=#9a3412'
-  tmux set-option -w -t "$S:work" pane-active-border-style 'fg=#fb923c,bold'
-  tmux set-option -w -t "$S:work" pane-border-format '#[fg=#fdba74,bold] DEV #[fg=#fff7ed] #{pane_title} '
-fi
+rtide_tmux_chrome "$S" "$S:work" "$DEV_MODE" \
+  "$(tr -d '[:space:]' < "$RTIDE_ROOT/VERSION")" "$DEV_LABEL"
 NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
-tmux select-pane -t "$NVIM_PANE" -T nvim
+tmux select-pane -t "$NVIM_PANE" -T editor
 tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim --listen '$DIR/.rtide/nvim.sock' '$DIR'" Enter
 tmux split-window -v -t "$NVIM_PANE" -l "$agent_lines" -c "$DIR"
 AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
 tmux set-option -p -t "$AGENT_PANE" @rtide-role agent
-tmux select-pane -t "$AGENT_PANE" -T agent
+tmux select-pane -t "$AGENT_PANE" -T composer
 tmux split-window -h -t "$NVIM_PANE" -p "$tweb_pct" -c "$DIR"
 TWEB_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')
 tmux set-option -p -t "$TWEB_PANE" @rtide-role tweb
-tmux select-pane -t "$TWEB_PANE" -T tweb
+tmux select-pane -t "$TWEB_PANE" -T output
 # Stable routing for harness command runners that do not inherit TMUX_PANE.
 printf '%s\n' "$TWEB_PANE" > "$DIR/.rtide/tweb-pane"
 # generate the per-workspace welcome page, then open it in tweb
@@ -2116,14 +2114,11 @@ done
 # prompt becomes usable can leave Electron holding a stale paint buffer, which
 # TWeb correctly refuses to display at the new dimensions.
 tmux resize-window -t "$S:work" -x "$START_W" -y "$START_H" 2>/dev/null || true
-tmux resize-pane -t "$AGENT_PANE" -y "$agent_lines"
-TWEB_W=$(( START_W * tweb_pct / 100 ))
-(( TWEB_W < 10 )) && TWEB_W=10
-tmux resize-pane -t "$TWEB_PANE" -x "$TWEB_W"
+apply_window_layout "$S:work" auto >/dev/null
 # A reload requests a fresh paint at the final pane dimensions after the
 # launch-time resize, avoiding a stale frame-size race in the Electron engine.
 tweb reload --pane "$TWEB_PANE" >/dev/null 2>&1 || true
-sleep 0.5
+tweb wait --pane "$TWEB_PANE" --load >/dev/null 2>&1 || true
 rtide_tweb_controls "$TWEB_PANE"
 
 # Only now start the agent prompt. It may still take a moment to initialize,
