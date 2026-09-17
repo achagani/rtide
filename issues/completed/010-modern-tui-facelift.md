@@ -1,6 +1,6 @@
 # 010: Modern fast TUI facelift
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/010-modern-tui-facelift`
 - Worktree: `../rtide-worktrees/010-modern-tui-facelift`
@@ -105,4 +105,28 @@ a heavyweight runtime dependency.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/010-modern-tui-facelift`, branch
+`issue/010-modern-tui-facelift`, as RTIDE 0.2.52.
+
+- Added `libexec/rtide/ui.sh` as the semantic token and state source of truth
+  (`docs/architecture/tui-design-system.md`): role-named colors, one state
+  vocabulary with text labels, compact/full density, and a single picker grammar.
+- Respect `NO_COLOR`, `RTIDE_NO_COLOR=1`, `TERM=dumb`, and `RTIDE_ASCII=1`;
+  labels and symbols never rely on color for meaning.
+- Added named responsive modes `auto`, `balanced`, `output`, `edit`, and
+  `compose` via `rtide layout [mode|cycle]`. Modes preserve pane identity and
+  running processes; collapse is a one-column state, not pane destruction.
+- Normalized tmux status, pane borders/titles, fzf pickers, action menus, and
+  popups around the shared tokens and key-hint grammar.
+- Removed the 0.24s window-title animation loop; the agent now publishes
+  transition-owned `@rtide-state` updates with no recurring subprocess churn.
+- Consolidated picker construction and fixed a `set -e` defect where
+  `rtide_picker_options` returned 1 when color was enabled, aborting the Fork
+  Manager before fzf ran.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.52 is the active
+immutable release. Added `tests/test-tui-design.sh` covering tokens, plain/ASCII
+modes, geometry, and picker grammar; updated agent-status and installation
+assertions to the transition-owned-state and semantic-badge contracts.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.
