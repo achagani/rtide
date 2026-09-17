@@ -43,6 +43,16 @@ local function snacks()
   return module
 end
 
+-- The source of a picker. Real Snacks stores it at `picker.opts.source`; some
+-- shapes also expose `picker.source`.
+local function picker_source(picker)
+  local opts = picker.opts
+  if type(opts) == "table" and opts.source then
+    return opts.source
+  end
+  return picker.source
+end
+
 -- The open explorer picker, if any.
 local function explorer_picker()
   local module = snacks()
@@ -51,11 +61,27 @@ local function explorer_picker()
     return nil
   end
   for _, picker in ipairs(module.picker.get() or {}) do
-    if picker.source == "explorer" then
+    if picker_source(picker) == "explorer" then
       return picker
     end
   end
   return nil
+end
+
+-- How many explorer pickers are open. Used to collapse accidental duplicates.
+local function explorer_count()
+  local module = snacks()
+  if not module or type(module.picker) ~= "table"
+      or type(module.picker.get) ~= "function" then
+    return 0
+  end
+  local count = 0
+  for _, picker in ipairs(module.picker.get() or {}) do
+    if picker_source(picker) == "explorer" then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 -- Width of the sidebar's list window, used to detect a clamped layout.
@@ -69,11 +95,17 @@ local function sidebar_width(picker)
 end
 
 local function close_explorer()
-  local picker = explorer_picker()
-  if picker then
-    pcall(function()
-      picker:close()
-    end)
+  local module = snacks()
+  if not module or type(module.picker) ~= "table"
+      or type(module.picker.get) ~= "function" then
+    return
+  end
+  for _, picker in ipairs(module.picker.get() or {}) do
+    if picker_source(picker) == "explorer" then
+      pcall(function()
+        picker:close()
+      end)
+    end
   end
 end
 
@@ -101,25 +133,32 @@ function M.reconcile()
   if not directory or not snacks() then
     return
   end
-  local picker = explorer_picker()
   local width = pane_width()
+  local count = explorer_count()
 
   if width < M.MIN_COLUMNS then
-    -- No room: remove any existing (clamped) sidebar.
-    if picker then
+    -- No room: remove every explorer so nothing is left clamped.
+    if count > 0 then
       close_explorer()
     end
     return
   end
 
-  if not picker then
+  -- Collapse duplicates that may have accumulated from earlier reconciles.
+  if count > 1 then
+    close_explorer()
+    count = 0
+  end
+
+  if count == 0 then
     open_explorer()
     return
   end
 
   -- A sidebar that opened narrower than its minimum is clamped; reopen it now
   -- that the pane has room.
-  if sidebar_width(picker) < M.MIN_SIDEBAR then
+  local picker = explorer_picker()
+  if picker and sidebar_width(picker) < M.MIN_SIDEBAR then
     close_explorer()
     open_explorer()
   end
@@ -139,14 +178,25 @@ function M.open(path)
 end
 
 -- Defer a reconciliation so rapid sequential resizes settle into one pass.
+-- Uses a libuv timer, because vim.defer_fn returns userdata that
+-- vim.fn.timer_stop cannot accept.
 local function schedule_reconcile()
   if timer then
-    pcall(vim.fn.timer_stop, timer)
+    pcall(function()
+      timer:stop()
+    end)
+    pcall(function()
+      timer:close()
+    end)
   end
-  timer = vim.defer_fn(function()
+  local uv = vim.uv or vim.loop
+  timer = uv.new_timer()
+  timer:start(150, 0, function()
+    timer:stop()
+    timer:close()
     timer = nil
-    M.reconcile()
-  end, 150)
+    vim.schedule(M.reconcile)
+  end)
 end
 
 -- Watch for a usable pane width and open the review view.

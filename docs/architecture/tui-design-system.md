@@ -65,8 +65,11 @@ Escape always cancels.
 
 Tmux status is session-scoped and one row. It shows RTIDE identity,
 workspace/window, textual agent state, layout mode, and output connection.
-Pane titles identify `editor`, `output`, and `composer`; menu and popup chrome
-uses the same background, border, focus, and text tokens.
+Pane borders are labelled by `@rtide-role` — `editor`, `output`, `composer` — not
+by `#{pane_title}`: RTIDE starts each pane with its launch command, so a
+title-based border leaks a raw command line. `@rtide-label` overrides the role
+label when set. Menu and popup chrome uses the same background, border, focus,
+and text tokens.
 
 TWeb authored documents remain visually sovereign. Shared output controls use
 the semantic focus/border/text roles, own navigation and zoom exactly once,

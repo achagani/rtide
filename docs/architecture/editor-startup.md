@@ -27,6 +27,13 @@ startup, so it does not depend on the user's keymaps or plugin list. It:
 - degrades safely: if Snacks is unavailable it notifies the user and returns
   `false` instead of breaking editor startup.
 
+The review view is width-aware. RTIDE creates the editor pane before it finishes
+splitting panes, so the pane can briefly be one column wide. `rtide-review.lua`
+reconciles the view on every resize: it opens the Snacks Explorer only when the
+pane is at least `RTIDE_REVIEW_MIN_COLUMNS` (default 40) wide, closes a sidebar
+that opened narrower than `RTIDE_REVIEW_MIN_SIDEBAR` (default 30), and collapses
+duplicates. A clamped sliver is therefore never left behind.
+
 The launcher builds the command in `rtide_nvim_command`, which is shared by the
 fresh-workspace and fork launch paths. Explicit-file precedence and the opt-out
 are enforced there, so the review view cannot leak into a direct open.

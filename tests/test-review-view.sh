@@ -41,6 +41,11 @@ check(is_open(), "reopens when the pane widens again")
 review.reconcile(); review.reconcile()
 check(#Snacks.picker.get() == 1, "reconcile is idempotent (single explorer)")
 
+-- Repeated reconciles on resize must never stack explorers, and duplicates
+-- left by an earlier reconcile must collapse (real-Snacks source field).
+review.reconcile(); review.reconcile(); review.reconcile()
+check(#Snacks.picker.get() == 1, "no stacked explorers after repeated reconciles")
+
 -- A sidebar opened narrow reports a clamped width; widening must replace it.
 state.reported_width = 6
 review.reconcile()

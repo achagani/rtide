@@ -28,8 +28,10 @@ M.picker = {
     if not state.open then
       return {}
     end
+    -- Mirror real Snacks, which stores the source at picker.opts.source. The
+    -- module must read that field; only setting picker.source would mask a bug.
     return { {
-      source = "explorer",
+      opts = { source = "explorer" },
       main = state.win,
       close = function()
         state.open = false
