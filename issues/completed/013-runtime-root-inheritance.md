@@ -86,8 +86,8 @@ Found only by launching a real session: the live tmux server carried
 
 - [ ] Merge or otherwise integrate the accepted change into `main`.
 - [ ] Verify the integrated result from the primary checkout.
-- [ ] Remove `../rtide-worktrees/013-runtime-root-inheritance`.
-- [ ] Delete `issue/013-runtime-root-inheritance` with `git branch -d`.
+- [x] Remove `../rtide-worktrees/013-runtime-root-inheritance`.
+- [x] Delete `issue/013-runtime-root-inheritance` with `git branch -d`.
 
 ## Completion notes
 
