@@ -67,6 +67,31 @@ load_config_file() {
 # entry point directly; development still opts into its separate directory.
 printf -v RTIDE_CMD '%q' "$SCRIPT_PATH"
 printf -v RTIDE_AGENT_CMD '%q' "$RTIDE_LIBEXEC_DIR/agent"
+RTIDE_REVIEW_LUA="$RTIDE_SHARE_DIR/rtide-review.lua"
+
+# Build the shell command that starts the editor pane.
+#
+# Review-first (issue 001): a fresh workspace opens a project review view with
+# no real file buffer, by sourcing the RTIDE review module once Snacks is
+# loaded. Explicit file arguments are honored directly, and they take
+# precedence over the review view.
+rtide_nvim_command() {
+  local dir="$1" shell="$2" file="${3:-}"
+  local cmd="SHELL=$shell nvim --listen '$dir/.rtide/nvim.sock'"
+  if [[ -n "$file" ]]; then
+    printf '%s %q\n' "$cmd" "$file"
+    return 0
+  fi
+  # A resumed workspace keeps its editor session; review-first only governs a
+  # fresh editor. RTIDE_REVIEW_FIRST=0 restores plain editor startup.
+  if [[ "${RTIDE_REVIEW_FIRST:-1}" == 1 && -r "$RTIDE_REVIEW_LUA" ]]; then
+    # -c runs after startup files, so Snacks and LazyVim are registered.
+    printf '%s -c %q\n' "$cmd" \
+      "lua pcall(function() local m=dofile('$RTIDE_REVIEW_LUA') m.setup(vim.fn.getcwd()) end)"
+    return 0
+  fi
+  printf '%s\n' "$cmd"
+}
 printf -v RTIDE_MEM_CMD '%q' "$RTIDE_LIBEXEC_DIR/memory"
 printf -v RTIDE_FORKS_CMD '%q' "$RTIDE_LIBEXEC_DIR/forks"
 printf -v RTIDE_STATUS_CMD '%q' "$RTIDE_LIBEXEC_DIR/workspace-status"
@@ -456,7 +481,7 @@ launch_fork_window() {
   nvim_pane=$(tmux list-panes -t "$fork_window" -F '#{pane_id}' | head -1)
   tmux set-option -p -t "$nvim_pane" @rtide-role nvim
   tmux select-pane -t "$nvim_pane" -T editor
-  tmux send-keys -t "$nvim_pane" "SHELL=$shell nvim --listen '$fork_dir/.rtide/nvim.sock' '$fork_dir'" Enter
+  tmux send-keys -t "$nvim_pane" "$(rtide_nvim_command "$fork_dir" "$shell")" Enter
   agent_pane=$(tmux split-window -d -v -P -F '#{pane_id}' -t "$nvim_pane" -l "$agent_lines" -c "$fork_dir")
   tmux set-option -p -t "$agent_pane" @rtide-role agent
   tmux select-pane -t "$agent_pane" -T composer
@@ -2123,7 +2148,7 @@ rtide_tmux_chrome "$S" "$S:work" "$DEV_MODE" \
 NVIM_PANE=$(tmux list-panes -t "$S:work" -F '#{pane_id}' | head -1)
 tmux set-option -p -t "$NVIM_PANE" @rtide-role nvim
 tmux select-pane -t "$NVIM_PANE" -T editor
-tmux send-keys -t "$NVIM_PANE" "SHELL=$shell nvim --listen '$DIR/.rtide/nvim.sock' '$DIR'" Enter
+tmux send-keys -t "$NVIM_PANE" "$(rtide_nvim_command "$DIR" "$shell")" Enter
 tmux split-window -v -t "$NVIM_PANE" -l "$agent_lines" -c "$DIR"
 AGENT_PANE=$(tmux display-message -p -t "$S:work" '#{pane_id}')   # new pane is active after split
 tmux set-option -p -t "$AGENT_PANE" @rtide-role agent

@@ -135,6 +135,9 @@ def verify(payload: Path) -> None:
         "provider", "render", "run", "settings", "tweb-common.sh",
         "guard-bin/tweb", "uninstall", "workspace-status",
     )
+    for asset in ("rtide-review.lua",):
+        if not (payload / "share" / asset).is_file():
+            raise SystemExit(f"payload is missing share asset: {asset}")
     missing_helpers = [name for name in required_helpers if not (payload / "libexec" / "rtide" / name).is_file()]
     if missing_helpers:
         raise SystemExit(f"payload is missing private helpers: {missing_helpers}")

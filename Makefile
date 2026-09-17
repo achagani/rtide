@@ -40,6 +40,7 @@ test: check
 	python3 tests/test-install-tmux.py
 	./tests/test-picker-contract.sh
 	./tests/test-tui-design.sh
+	./tests/test-review-startup.sh
 	./tests/test-fork-snapshot.sh
 	./tests/test-fork-launch-status.sh
 	./tests/test-pane-popup-safety.sh

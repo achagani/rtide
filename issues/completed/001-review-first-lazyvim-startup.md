@@ -1,6 +1,6 @@
 # 001: Review-first LazyVim startup
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/001-review-first-lazyvim-startup`
 - Worktree: `../rtide-worktrees/001-review-first-lazyvim-startup`
@@ -79,4 +79,27 @@ not treated as complete.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/001-review-first-lazyvim-startup`,
+branch `issue/001-review-first-lazyvim-startup`, as RTIDE 0.2.57.
+
+- Added `share/rtide-review.lua`, a self-contained module the launcher
+  `dofile`s after startup. It opens the LazyVim-provided Snacks Explorer rooted
+  at the workspace with `git_status` enabled and leaves the initial buffer
+  unnamed (`buflisted = false`), so a fresh launch selects no real file.
+  If Snacks is unavailable it notifies and returns `false` instead of breaking
+  startup.
+- Added `rtide_nvim_command` in the launcher, shared by fresh-workspace and fork
+  panes. Precedence: explicit file argument > resumed session > fresh
+  review-first launch, with `RTIDE_REVIEW_FIRST=0` as an opt-out.
+- Documented the behavior in `docs/architecture/editor-startup.md`.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.57 is the active
+immutable release. Added `tests/test-review-startup.sh`, which checks the
+command contract, Git-aware entry, an unnamed initial buffer, safe degradation
+without Snacks, and explicit-file precedence using headless Neovim.
+
+Manual RTIDE verification is limited because this worktree runs without a live
+tmux/tweb pane; the headless Neovim checks cover the module behavior and the
+launcher command construction.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.
