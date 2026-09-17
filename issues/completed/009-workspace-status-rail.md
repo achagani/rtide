@@ -97,8 +97,8 @@ retaining its tmux, Neovim, TWeb, and per-workspace agent ownership model.
 ## Worktree cleanup checklist
 
 - [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/009-workspace-status-rail`.
-- [ ] Delete `issue/009-workspace-status-rail` safely.
+- [x] Remove `../rtide-worktrees/009-workspace-status-rail`.
+- [x] Delete `issue/009-workspace-status-rail` safely.
 
 ## Completion notes
 
