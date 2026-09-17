@@ -73,8 +73,8 @@ pending until the remaining acknowledgement gap is resolved.
 ## Worktree cleanup checklist
 
 - [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/005-output-pane-reliability`.
-- [ ] Delete `issue/005-output-pane-reliability` safely.
+- [x] Remove `../rtide-worktrees/005-output-pane-reliability`.
+- [x] Delete `issue/005-output-pane-reliability` safely.
 
 ## Completion notes
 
