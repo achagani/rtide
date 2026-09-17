@@ -1,7 +1,7 @@
 # 005: Output-pane reliability
 
 - Status: proposed
-- Priority rank: 4
+- Priority rank: 3
 - Branch: `issue/005-output-pane-reliability`
 - Worktree: `../rtide-worktrees/005-output-pane-reliability`
 

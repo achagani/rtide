@@ -1,7 +1,7 @@
 # 004: TWeb connection recovery
 
 - Status: proposed
-- Priority rank: 3
+- Priority rank: 2
 - Branch: `issue/004-tweb-connection-recovery`
 - Worktree: `../rtide-worktrees/004-tweb-connection-recovery`
 

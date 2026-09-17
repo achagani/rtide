@@ -1,6 +1,6 @@
 # 009: Workspace status and switching rail
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/009-workspace-status-rail`
 - Worktree: `../rtide-worktrees/009-workspace-status-rail`
@@ -102,4 +102,29 @@ retaining its tmux, Neovim, TWeb, and per-workspace agent ownership model.
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/009-workspace-status-rail`, branch
+`issue/009-workspace-status-rail`, as RTIDE 0.2.51.
+
+- Added `libexec/rtide/workspace-status`: atomic per-window lifecycle records in
+  runtime storage, locked write-then-replace, with workspace identity, branch,
+  fork origin, lifecycle, attention, heartbeat, and publisher PID.
+- Lifecycle states are `working`, `input-needed`, `done`, `ready`, `error`;
+  `stale` is derived only from the heartbeat policy. `input-needed` and
+  `done-unseen` stay sticky until an `answer` (or, for done-unseen, `focus`)
+  acknowledgement.
+- The agent wrapper publishes event-driven transitions and runs a bounded
+  30-second heartbeat thread; no per-cell polling.
+- Workspace identity is collision-safe (basename plus content hash), fork windows
+  group under their source workspace, and duplicate basenames remain distinct.
+- The rail discovers all RTIDE sessions in one tmux call and switches only the
+  invoking client; below 72 columns or 16 rows it collapses to a centered overlay.
+  Prefix+w opens it; `after-select-window` acknowledges focus.
+- The workspace picker and fork manager now consume the same canonical status
+  data instead of divergent session/title inference.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.51 is the active
+immutable release. Status state-machine, sticky acknowledgement, duplicate
+basename/fork inventory, invoking-client switch, geometry, and one-call burst
+performance tests pass.
+
+Not yet done: integration into `main`, worktree removal, and branch deletion.
