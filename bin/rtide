@@ -26,7 +26,20 @@
 set -euo pipefail
 
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || realpath "$0")
-RTIDE_ROOT="${RTIDE_ROOT:-$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)}"
+# The release this script actually lives in. Used whenever RTIDE_ROOT is unset
+# or carries a stale/invalid value inherited from the environment.
+SELF_ROOT=$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)
+# An inherited RTIDE_ROOT must be a usable runtime root. A tmux server snapshots
+# its creator's environment, so a path to a since-pruned release can survive and
+# would otherwise abort every later launch here with a missing picker.sh.
+rtide_root_usable() {
+  [[ -n "${1:-}" && -r "$1/libexec/rtide/picker.sh" && -f "$1/VERSION" ]]
+}
+RTIDE_ROOT="${RTIDE_ROOT:-$SELF_ROOT}"
+if ! rtide_root_usable "$RTIDE_ROOT"; then
+  printf 'note: ignoring unusable RTIDE_ROOT %s; using %s\n' "$RTIDE_ROOT" "$SELF_ROOT" >&2
+  RTIDE_ROOT="$SELF_ROOT"
+fi
 RTIDE_BIN_DIR="$RTIDE_ROOT/bin"
 RTIDE_LIBEXEC_DIR="$RTIDE_ROOT/libexec/rtide"
 RTIDE_SHARE_DIR="$RTIDE_ROOT/share"

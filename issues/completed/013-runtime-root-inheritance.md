@@ -1,6 +1,6 @@
 # 013: Runtime root inheritance and launcher resilience
 
-- Status: proposed
+- Status: completed
 - Priority rank: 1
 - Branch: `issue/013-runtime-root-inheritance`
 - Worktree: `../rtide-worktrees/013-runtime-root-inheritance`
@@ -91,4 +91,20 @@ Found only by launching a real session: the live tmux server carried
 
 ## Completion notes
 
-Not completed.
+Completed in worktree `../rtide-worktrees/013-runtime-root-inheritance`, branch
+`issue/013-runtime-root-inheritance`, as RTIDE 0.2.63.
+
+- `bin/rtide` now validates an inherited `RTIDE_ROOT` with `rtide_root_usable`
+  (requires `libexec/rtide/picker.sh` and `VERSION`) and falls back to the
+  release containing the running script (`SELF_ROOT`) when it is unusable,
+  printing one explanatory line. A valid explicit root is still honored.
+- Verified with a real launch in the affected tmux server, which carried
+  `RTIDE_ROOT=…/versions/0.2.58` after that release was pruned by retention:
+  the launch reported `ignoring unusable RTIDE_ROOT … using …/0.2.63` and the
+  workspace started normally with all three panes and a live editor socket.
+
+Evidence: full `make install` suite passed and RTIDE 0.2.63 is the active
+immutable release. Added `tests/test-runtime-root.sh` covering stale, invalid,
+valid, and default roots.
+
+Not yet done: worktree removal and branch deletion.
