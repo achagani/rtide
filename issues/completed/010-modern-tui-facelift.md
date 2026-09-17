@@ -100,8 +100,8 @@ a heavyweight runtime dependency.
 ## Worktree cleanup checklist
 
 - [ ] Integrate and verify the accepted change on `main`.
-- [ ] Remove `../rtide-worktrees/010-modern-tui-facelift`.
-- [ ] Delete `issue/010-modern-tui-facelift` safely.
+- [x] Remove `../rtide-worktrees/010-modern-tui-facelift`.
+- [x] Delete `issue/010-modern-tui-facelift` safely.
 
 ## Completion notes
 
