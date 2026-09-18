@@ -53,6 +53,71 @@ class ComposerTests(unittest.TestCase):
             composer._render(COMPOSER.Buffer("one\ntwo\nthree\nfour"), "ready")
         self.assertEqual(composer.stdout.getvalue().count("\x1b[2K"), 3)
 
+    @staticmethod
+    def _visible_line_starts(stream):
+        """(column, first char) per visible row under a raw-mode column model:
+        \\n feeds without resetting the column, \\r resets it to 0, and CSI
+        sequences (including ESC[2K) never move the cursor."""
+        starts = []
+        col = 0
+        at_row_start = True
+        i = 0
+        while i < len(stream):
+            ch = stream[i]
+            if ch == "\x1b":
+                if i + 1 < len(stream) and stream[i + 1] == "[":
+                    j = i + 2
+                    while j < len(stream) and not stream[j].isalpha():
+                        j += 1
+                    i = j + 1
+                else:
+                    i += 2
+                continue
+            if ch == "\r":
+                col = 0
+                i += 1
+                continue
+            if ch == "\n":
+                at_row_start = True
+                i += 1
+                continue
+            if at_row_start:
+                starts.append((col, ch))
+                at_row_start = False
+            col += 1
+            i += 1
+        return starts
+
+    def _render_capture(self, buffer, status, drawn=0, size=(80, 3)):
+        composer = COMPOSER.Composer.__new__(COMPOSER.Composer)
+        composer.attachments = []
+        composer.message = ""
+        composer._drawn = drawn
+        composer.stdout = io.StringIO()
+        with mock.patch.object(COMPOSER.shutil, "get_terminal_size",
+                               return_value=os.terminal_size(size)):
+            composer._render(buffer, status)
+        return composer.stdout.getvalue()
+
+    def test_render_starts_every_row_at_column_zero(self):
+        status = "RTIDE  \u25cf ready \u00b7 Enter send \u00b7 Ctrl+J newline \u00b7 Ctrl+G editor"
+        stream = self._render_capture(COMPOSER.Buffer("hi"), status)
+        starts = self._visible_line_starts(stream)
+        self.assertEqual(len(starts), 2)
+        self.assertTrue(all(col == 0 for col, _ in starts),
+                        f"rows must render flush left, got {starts}")
+        prompt = [col for col, ch in starts if ch == "\u2570"]
+        self.assertTrue(prompt)
+        self.assertTrue(all(col == 0 for col in prompt))
+
+    def test_redraw_keeps_every_row_at_column_zero(self):
+        status = "RTIDE  \u25cf ready \u00b7 Enter send \u00b7 Ctrl+J newline \u00b7 Ctrl+G editor"
+        stream = self._render_capture(COMPOSER.Buffer("one\ntwo"), status,
+                                      drawn=2)
+        starts = self._visible_line_starts(stream)
+        self.assertTrue(all(col == 0 for col, _ in starts),
+                        f"redraw rows must render flush left, got {starts}")
+
     def test_path_staging_snapshots_bytes_and_permissions(self):
         with tempfile.TemporaryDirectory() as workspace:
             source = os.path.join(workspace, "source image.png")

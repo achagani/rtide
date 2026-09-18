@@ -333,7 +333,10 @@ class Composer:
             self.stdout.write(f"\x1b[{self._drawn - 1}A\r")
         self.stdout.write("\x1b[?25l")
         for index, line in enumerate(lines):
-            self.stdout.write("\x1b[2K" + line)
+            # ESC[2K erases the line but does not reset the column, and raw-mode
+            # \n feeds without a carriage return. Without the \r each row starts
+            # at the previous row's end column, indenting the prompt.
+            self.stdout.write("\r\x1b[2K" + line)
             if index != len(lines) - 1:
                 self.stdout.write("\n")
         if self._drawn > len(lines):
